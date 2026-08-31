@@ -1,852 +1,488 @@
 # ReproDocket Design Specification
 
 Date: August 31, 2026
-Status: Design baseline
+Status: Pre-implementation design baseline
 
 ## 1. Purpose
 
-ReproDocket is a local, evidence first web defect investigation product built on Solari. A user supplies a target URL, a problem description, and optional known reproduction steps. ReproDocket drives real Solari cloud browsers to investigate the problem, captures evidence, starts a completely fresh Solari browser to independently verify the reproduction, and presents the complete result locally without requiring a database server, manual service wiring, raw artifact inspection, or a trip through the Solari dashboard to understand what happened.
+ReproDocket is a local, evidence-first web defect reproduction and verification product built on Solari. A user supplies a public web target, a human-readable problem description, and an auditable reproduction/observation plan. ReproDocket executes that plan in a real Solari cloud browser, captures supporting evidence, closes the first browser, repeats the same plan in a fresh Solari browser, and presents the combined result locally.
 
-The product is designed to make web defect reproduction more trustworthy. Instead of reporting only that an automated run passed or failed, ReproDocket preserves the observed browser behavior, supporting evidence, independent verification result, and resource lifecycle in one local record.
+The product is designed to make browser defect reproduction more trustworthy. It does not treat one automated attempt, one screenshot, or one console error as sufficient proof. Investigation, independent verification, evidence provenance, persistence, and resource cleanup are separate parts of the result.
 
 ## 2. Solari integration
 
-The upstream Solari cookbook remains intact and ReproDocket is added as a first class project under `reprodocket/`. The fork relationship, upstream license, attribution, and original examples are preserved.
+The upstream Solari cookbook remains intact. ReproDocket is added as a first-class project under `reprodocket/`. The fork relationship, upstream examples, MIT license, and Pinetree Research copyright remain preserved.
 
-Solari is central to the product rather than a decorative dependency. The shipped investigation path uses real Solari browser execution. The full validation path also uses real Solari execution. Isolated unit tests may use test doubles where isolation is appropriate, but mocks and local substitutes cannot satisfy live integration or end to end completion gates.
+Solari is central to the shipped workflow. Production investigations and independent verification use real Solari cloud browsers. The deterministic full validation fixture is hosted in a real Solari sandbox. Unit and local integration tests may use test doubles where isolation is appropriate, but doubles cannot satisfy live Solari or end-to-end completion gates.
 
-## 3. Product boundary
+There is no silent local-browser fallback for a production investigation.
 
-Version one supports one complete job exceptionally well:
+## 3. Supported version-one workflow
 
-1. Accept a web target and defect report.
-2. Create an actual Solari browser session with recording enabled.
-3. Navigate and execute the intended workflow.
-4. Capture meaningful screenshots, console failures, page errors, network failures, action timing, URLs, and state observations.
-5. Derive or preserve reproduction steps.
-6. Close the first browser and release all owned resources.
-7. Start a new independent Solari browser session.
-8. Repeat the minimal reproduction workflow.
-9. Compare investigation and verification evidence.
-10. Produce a truthful outcome.
-11. Persist the run locally.
-12. Show the result, evidence, replay data or replay access, logs, timeline, and history in the local ReproDocket interface.
+Version one supports this complete user path:
 
-Version one is not a general browser agent, test case management suite, issue tracker replacement, hosted SaaS, team account system, billing product, CI platform, or generic AI framework.
+1. Start ReproDocket locally with one command.
+2. Configure a Solari API key through the local interface if no supported credential source is already present.
+3. Enter a public HTTP/HTTPS target URL.
+4. Enter a problem description.
+5. Enter an auditable reproduction and observation plan using the supported plan grammar.
+6. Submit the run.
+7. ReproDocket validates the request before creating an external resource.
+8. ReproDocket creates a recorded Solari browser and executes the plan.
+9. It captures semantically useful screenshots, action timing, page errors, selected console evidence, selected network evidence, current URLs/status, and expectation results.
+10. It closes the investigation browser and records replay state.
+11. It creates a separate fresh recorded Solari browser.
+12. It executes the same validated plan as independent verification.
+13. It compares evidence from both attempts and produces a bounded final outcome.
+14. It writes a durable local manifest, integrity metadata, JSON report, and static HTML report.
+15. The local interface shows investigation evidence, verification evidence, final outcome, replay state, cleanup state, and history.
+16. Completed runs remain available after ReproDocket restarts.
 
-## 4. Engineering decision hierarchy
+Version one does not promise arbitrary autonomous bug discovery from prose alone. A future AI planner may generate the same auditable plan, but no runtime planner is required for the initial product.
 
-Engineering decisions use this precedence:
+## 4. Auditable plan model
 
-1. Product requirements and the supported user workflow.
-2. Security, privacy, truthful evidence, and data integrity.
-3. Reliability, reproducibility, maintainability, and resource safety.
-4. The simplest implementation that delivers a complete and credible result quickly.
+The plan has two kinds of statements: browser actions and observable expectations.
 
-A prior design choice is not preserved merely because it was previously chosen. If implementation evidence proves another approach materially better, the change must be documented, tested, and evaluated against the same completion gates.
+Initial actions include:
 
-## 5. Technology choices
+```text
+OPEN
+CLICK
+FILL
+SELECT
+CHECK
+UNCHECK
+PRESS
+WAIT_FOR_TEXT
+WAIT_FOR_URL
+RELOAD
+BACK
+FORWARD
+```
 
-### 5.1 Primary language and runtime
+Initial expectations include:
 
-ReproDocket uses TypeScript on Node.js. This follows Solari's direct JavaScript and TypeScript browser path and avoids an unnecessary interoperability layer around the Solari SDK.
+```text
+EXPECT_TEXT
+EXPECT_NO_TEXT
+EXPECT_URL
+EXPECT_PAGE_ERROR
+EXPECT_MAIN_STATUS
+```
 
-The repository commits `package-lock.json`. Dependency resolution for a validated release is therefore reproducible. Dependency versions are selected from the current compatible Solari SDK and proven by live smoke tests rather than copied blindly from an older example.
+The exact syntax and contracts are defined in [`reprodocket-interface-contracts.md`](reprodocket-interface-contracts.md).
 
-### 5.2 Local server
+The grammar intentionally excludes arbitrary JavaScript, arbitrary CSS/XPath selectors, shell execution, direct DOM mutation, filesystem access, and local-process commands.
 
-Fastify provides the local HTTP service. The production style local application serves the built React UI, API routes, evidence files, and Server Sent Events from one Node process.
+A problem description explains the defect to a human. The plan explains what the browser should do and which observable condition defines success/failure. Neither one directly sets the final result.
 
-The normal application binds only to loopback by default.
+## 5. Result model
 
-### 5.3 Local UI
+Run lifecycle and defect outcome are separate authorities.
 
-React with Vite provides the local interface. Electron, Next.js, Docker, and a separate database server are excluded from the initial product because they do not improve the supported workflow enough to justify their setup and failure surface.
+Lifecycle:
 
-### 5.4 Progress transport
+```text
+CREATED
+PREPARING
+INVESTIGATING
+VERIFYING
+FINALIZING
+COMPLETED
+FAILED
+CANCELLED
+INTERRUPTED
+```
 
-Server Sent Events provide server to browser progress updates. The application does not introduce WebSockets unless bidirectional realtime requirements later prove necessary.
+Final outcome:
 
-### 5.5 Persistence
+```text
+VERIFIED
+REPRODUCED
+NOT_REPRODUCED
+INCONCLUSIVE
+```
 
-The first version uses filesystem based run storage. Each run is self contained and machine readable. A database is not required for startup, installation, migration, or recovery.
+`VERIFIED` requires reproduction evidence from the investigation and a separate fresh verification session.
 
-Normal run data lives under the current user's local application data directory rather than the Git repository.
+`REPRODUCED` means the first attempt observed the defined defect condition but clean independent verification did not confirm it.
 
-### 5.6 Secrets
+`NOT_REPRODUCED` means the intended workflow and observation contract were exercised sufficiently and the defined defect condition was not observed.
 
-The normal Windows experience stores the Solari API key using a Windows user scoped protected secret store. The key never belongs in source control, evidence output, screenshots, exception serialization, or public documentation.
+`INCONCLUSIVE` means the available evidence is not strong enough for a trustworthy determination.
 
-Environment variable support may remain available for development and automated environments, but a normal user is not required to create or edit an `.env` file.
+An infrastructure failure does not become `NOT_REPRODUCED`. A console warning or failed subrequest alone does not become `REPRODUCED`. Uncertainty is preserved rather than promoted to success.
 
-## 6. Repository structure
+## 6. Technology choices
+
+### 6.1 Runtime and language
+
+ReproDocket uses TypeScript on Node.js. This follows Solari's direct JavaScript/TypeScript browser path and avoids an unnecessary interoperability layer.
+
+Exact dependency versions are locked through `reprodocket/package-lock.json` after installation and live contract validation.
+
+### 6.2 Local server and UI
+
+Fastify provides the local service. React with Vite provides the local interface. The normal built application is served from one loopback Node process.
+
+Server-Sent Events provide live progress updates. Durable run state remains the authority after reconnect or refresh.
+
+### 6.3 Persistence
+
+Version one uses filesystem-based run storage under the current user's local application data directory. No database server, schema deployment, or manual migration step is required.
+
+Large/generated runtime evidence remains outside source control.
+
+### 6.4 Credentials
+
+The normal Windows path stores a Solari credential using the current Windows-user protection boundary. Environment-variable support remains available for automated/developer environments, but a normal user is not required to create an `.env` file.
+
+Secrets are excluded from run manifests, evidence, reports, screenshots generated by ReproDocket itself, logs, process metadata, and public source. Target screenshots may still contain sensitive information visibly rendered by the target site; the product must state that limitation truthfully.
+
+## 7. Repository shape
 
 ```text
 solari-cookbook/
-  examples/                       existing upstream cookbook
-  LICENSE                         existing upstream license
-  README.md                       upstream overview plus ReproDocket entry
+  examples/                       upstream cookbook preserved
+  LICENSE                         upstream license preserved
+  README.md                       cookbook plus restrained ReproDocket entry after release
   docs/
     reprodocket-design.md
+    reprodocket-interface-contracts.md
+    reprodocket-security-lifecycle.md
+    reprodocket-sdk-baseline.md
+    reprodocket-test-matrix.md
+    implementation/
   reprodocket/
     package.json
     package-lock.json
-    tsconfig.json
-    vite.config.ts
-    eslint.config.js
     src/
       client/
-        App.tsx
-        main.tsx
-        pages/
-        components/
-        api/
       server/
-        server.ts
-        routes/
-        sse/
-        startup/
       core/
-        InvestigationEngine.ts
-        InvestigationPlanner.ts
-        VerificationEngine.ts
-        RunCoordinator.ts
-        OutcomeClassifier.ts
-        models/
       solari/
-        SolariBrowserFactory.ts
-        SolariInvestigator.ts
-        SolariRecorder.ts
-        SolariSandboxFixture.ts
-        SessionTracker.ts
       evidence/
-        EvidenceCollector.ts
-        ScreenshotCollector.ts
-        ConsoleCollector.ts
-        NetworkCollector.ts
-        EvidenceHasher.ts
-        Redactor.ts
       storage/
-        RunStore.ts
-        FileRunStore.ts
-        RunManifestSchema.ts
+      reporting/
       security/
-        SecretStore.ts
-        WindowsDpapiSecretStore.ts
       shared/
-        contracts/
-        errors/
+      validation/
     fixtures/
-      defective-site/
     tests/
-      unit/
-      integration/
-      ui/
-      live/
-      e2e/
     scripts/
-      bootstrap.ps1
-      preflight.ps1
-      run.ps1
-      validate.ps1
-      stop.ps1
-      clean.ps1
     docs/
-      architecture.md
-      validation.md
 ```
 
-Files and modules should remain small enough that their responsibility is obvious from their public interface. Unrelated refactoring is out of scope, but files that become multi responsibility bottlenecks during this work must be split as part of the affected slice.
+Implementation files should have one clear responsibility. Shared bottlenecks are split when they become multi-purpose or create unclear ownership.
 
-## 7. User experience
+## 8. Local startup and zero-configuration goal
 
-### 7.1 Zero configuration normal startup
-
-The normal entry point is:
+The normal Windows start path is:
 
 ```powershell
 .\reprodocket\scripts\run.ps1
 ```
 
-The script determines the repository root, validates prerequisites, repairs safely repairable missing prerequisites, restores dependencies, builds when required, starts one owned local ReproDocket instance, verifies health, and opens the user's default browser.
+The startup path discovers the repository/application location, verifies required tooling, restores/builds when necessary, starts one owned local ReproDocket instance, health-checks it, and opens the default browser.
 
-The user does not configure ports, create a database, edit frontend configuration, create environment files, locate artifact directories, or start separate frontend and backend terminals.
+The user does not manually configure ports, start separate frontend/backend terminals, create a database, edit JSON configuration, or browse artifact folders to understand results.
 
-If the preferred port is occupied by another process, ReproDocket chooses another port. It does not terminate an unrelated process.
+If the preferred port is already owned by another process, ReproDocket selects another loopback port. It never kills an unrelated process simply to obtain a preferred port.
 
-If an already running ReproDocket instance can be authoritatively identified as belonging to this application instance, `run.ps1` opens that instance rather than creating a duplicate.
+A separate `bootstrap.ps1` handles missing prerequisites where safe automation is available. A separate `validate.ps1` owns deterministic validation profiles.
 
-### 7.2 First run credential flow
+New Windows automation does not use WMIC.
 
-If no Solari credential is available, the local UI presents a Solari connection screen. Saving the key performs a real harmless credential verification before reporting success. A failure remains visible with a useful reason and does not store a credential as validated.
+## 9. Local service security
 
-### 7.3 Main screens
+The local server binds to loopback only by default. It rejects unexpected host/origin state-changing requests and uses a process-local request nonce as defense in depth for mutation APIs.
 
-The MVP exposes three complete surfaces and no decorative dead surfaces:
+The built UI uses a restrictive content policy. Target-derived values render as inert text. The standalone HTML report escapes untrusted values and does not require JavaScript.
 
-1. New Investigation.
-2. Active Investigation.
-3. Run Detail with History navigation.
+Artifact APIs resolve only run-owned artifact identifiers from validated manifests. User-provided filesystem paths are not accepted.
 
-Every visible button, tab, menu, link, badge, and action must either complete a real workflow, be truthfully disabled with a current reason, or not appear.
+Detailed requirements are in [`reprodocket-security-lifecycle.md`](reprodocket-security-lifecycle.md).
 
-## 8. Investigation request
+## 10. Target safety
 
-The initial user request contains:
+Version one accepts only public HTTP/HTTPS targets. It rejects executable/local schemes, credentials embedded in URLs, loopback, link-local, private address literals, and known metadata-service destinations before execution.
 
-1. Target URL.
-2. Problem description.
-3. Optional known reproduction steps.
+Redirects and DNS destinations are revalidated to the strongest authoritative boundary the installed browser/provider exposes. The product must document any provider-dependent limitation rather than claiming universal SSRF prevention.
 
-Only supported URL schemes are accepted. The browser investigation boundary accepts ordinary HTTP and HTTPS targets. File, data, JavaScript, and other executable or local schemes are rejected.
+## 11. Evidence model
 
-The product contains an `InvestigationPlanner` boundary so runtime planning can evolve without contaminating evidence collection and browser lifecycle code. A second hosted AI provider is not a mandatory dependency. If a future planner is added, its output remains auditable and cannot independently create a VERIFIED result without observed evidence.
+Evidence is captured at meaningful semantic boundaries rather than fixed screenshot intervals.
 
-## 9. Run lifecycle
+Durable evidence may include:
 
-Lifecycle and outcome are separate authorities.
+* screenshots,
+* warning/error console entries,
+* uncaught page errors,
+* sanitized network method/URL/status/failure information,
+* action/expectation timeline,
+* Solari session identity,
+* replay availability/reference or locally retained replay data when the TypeScript SDK path is proven,
+* investigation and verification observations,
+* cleanup state.
 
-Lifecycle values:
+Authorization/cookie headers, unrestricted bodies, password values, browser-storage dumps, Solari credentials, and arbitrary DOM snapshots are excluded by default.
 
-* CREATED
-* PREPARING
-* INVESTIGATING
-* VERIFYING
-* FINALIZING
-* COMPLETED
-* FAILED
-* CANCELLED
-* INTERRUPTED
+Text evidence passes through a central redaction boundary before persistence.
 
-Outcome values:
+## 12. Evidence integrity and provenance
 
-* VERIFIED
-* REPRODUCED
-* NOT_REPRODUCED
-* INCONCLUSIVE
+Each finalized durable artifact receives a SHA256 digest. A final manifest records ownership, artifact identity, byte length, digest, timestamps, source revision, application version, relevant package versions, fixture version for harness runs, and validation profile.
 
-A completed run may truthfully be NOT_REPRODUCED. A failed run must never be silently mapped to NOT_REPRODUCED. An unavailable dependency, infrastructure failure, blocked authentication path, or ambiguous report produces an appropriate lifecycle failure or INCONCLUSIVE result rather than a false healthy conclusion.
+A finalized artifact that is missing, substituted, or hash-mismatched is not silently displayed under a valid evidence label.
 
-Every lifecycle transition is persisted before dependent work assumes the transition occurred.
+Historical outputs do not satisfy a fresh validation gate after relevant source changes.
 
-## 10. Investigation data flow
+## 13. Independent verification
 
-The production flow is:
+Investigation and verification are deliberately separate attempts.
+
+The investigation browser is closed before the verification attempt is created. The verification attempt receives a new Solari session identity and new browser/page state. Browser/session reuse is prohibited for the verification claim.
+
+The harness explicitly checks that session IDs differ. A classifier cannot return `VERIFIED` without evidence from both attempts.
+
+## 14. Deterministic Solari fixture
+
+The full harness hosts a controlled test website inside a real Solari sandbox and exposes it using a Solari preview URL. The URL is externally probed before browser tests consume it.
+
+The fixture contains deterministic defect, healthy, ambiguous, and nonrepeatable cases. Its truth is tested independently from ReproDocket so the fixture itself is not a weak oracle.
+
+Production ReproDocket code cannot branch on fixture route names or scenario IDs to manufacture expected outcomes.
+
+## 15. Run storage and recovery
+
+Each run owns a generated directory beneath the application data root. Manifest updates are written atomically where practical.
+
+Malformed historical state is isolated to the affected run rather than crashing history globally.
+
+A previous-process run left in a nonterminal state becomes `INTERRUPTED` on startup unless a future explicitly designed resume mechanism is introduced. Version one does not automatically replay browser actions after a crash.
+
+Captured valid evidence is preserved.
+
+## 16. Resource ownership
+
+Every Solari browser/sandbox created by ReproDocket is registered immediately with explicit ownership. Browser/session and sandbox cleanup occur in structured `finally`-style boundaries.
+
+A functional scenario cannot produce a clean Full lifecycle result while required owned resources remain unresolved.
+
+The local server also records sufficient identity to distinguish its owned process from a recycled or unrelated PID before stop operations.
+
+## 17. Concurrency and cancellation
+
+Version one supports one executing investigation pipeline per local application process. This is explicit supported capacity, not a hidden limit.
+
+A second create request while a run is active receives a visible `RUN_ALREADY_ACTIVE` response. It is not silently dropped or silently queued. Historical browsing remains available.
+
+Cancellation stops new actions, aborts/winds down the current attempt within bounded time, releases owned remote resources, and persists `CANCELLED`. The UI does not optimistically display cancellation completion before the server has persisted it.
+
+Application shutdown follows the same ownership-aware cleanup path for an active run.
+
+## 18. Local results interface
+
+The version-one UI is intentionally small and complete rather than broad and decorative.
+
+Primary surfaces:
 
 ```text
-Local UI
-  -> Fastify API
-  -> RunCoordinator
-  -> InvestigationEngine
-  -> SolariBrowserFactory
-  -> real Solari browser
-  -> EvidenceCollector
-  -> FileRunStore
-  -> VerificationEngine
-  -> second real Solari browser
-  -> Evidence comparison
-  -> OutcomeClassifier
-  -> finalized manifest and report
-  -> Fastify API and SSE
-  -> Local UI
+provider connection state
+new investigation
+active investigation
+run detail with history navigation
 ```
 
-The same authoritative run identity follows the workflow from creation through evidence display. No UI surface synthesizes a successful state that is absent from the persisted run authority.
-
-## 11. Horizontal and vertical integration requirements
-
-### 11.1 Vertical integration
-
-Every supported user outcome must be proven through the entire stack, not only at one layer.
-
-For a normal investigation, proof must traverse:
-
-1. User input in the actual local UI.
-2. API validation.
-3. Coordinator state creation.
-4. Solari session creation.
-5. Browser action execution.
-6. Evidence collection.
-7. Persistent storage.
-8. Independent verification.
-9. Final classification.
-10. UI projection of the exact persisted result.
-11. Run reload after restart.
-12. Resource cleanup and user return path.
-
-A test that exercises only the core engine, API, or Solari adapter cannot satisfy vertical completion.
-
-### 11.2 Horizontal integration
-
-Sibling product surfaces that describe the same run must agree and remain connected to the same authoritative state.
-
-Horizontal checks include:
-
-* Active Investigation status versus persisted lifecycle state.
-* Run History status versus Run Detail status.
-* Outcome badge versus report outcome.
-* Screenshot list versus manifest evidence entries.
-* Console and network views versus their persisted artifacts.
-* Replay control versus actual replay availability.
-* Session cleanup status versus tracked Solari resource state.
-* Settings and credential readiness versus the runtime provider path.
-* Validation summaries versus the exact current source revision and evidence set.
-* README capability claims versus the actually proven feature maturity.
-
-A defect in shared routing, storage, state projection, serialization, or lifecycle infrastructure triggers review of adjacent sibling paths that use the same infrastructure.
-
-### 11.3 Connectivity matrix
-
-A connectivity matrix is maintained for every visible feature before a milestone can graduate. Each row records:
-
-* Discoverability.
-* Entry point.
-* Prerequisite truth.
-* Action routing.
-* Feedback.
-* Authoritative state.
-* Persistence.
-* Reload.
-* Recovery.
-* Exit or return path.
-* Automated regression coverage.
-* Human QA requirement if any.
-
-Rows may be COMPLETE, PARTIAL, DISCONNECTED, DEAD, STALE, INTENTIONALLY_DISABLED, DEFERRED, or UNKNOWN. UNKNOWN and PARTIAL visible behavior block a broad completion claim until investigated.
-
-## 12. Solari browser lifecycle
-
-Every investigation browser is a real Solari browser. Recording is enabled when the current SDK supports the required recorded session path.
-
-The first investigation and the independent verification use different Solari session identities. Reusing the original browser, page, context, or session is prohibited for verification.
-
-Resource creation is recorded immediately. Cleanup occurs in `finally` style ownership boundaries and cleanup results are recorded. A test is not considered lifecycle clean if functional assertions pass while an owned Solari browser or sandbox remains active unexpectedly.
-
-## 13. Evidence model
-
-Evidence is captured at meaningful semantic boundaries rather than indiscriminately.
-
-For browser actions, ReproDocket records the fields needed to reconstruct the workflow, including timestamp, action, target description where available, URL before and after, result, and duration.
-
-Evidence sources include:
-
-* Screenshots.
-* Console errors and warnings.
-* Uncaught page errors.
-* Relevant failed or erroneous network requests.
-* Action timeline.
-* Session identity.
-* Replay availability and replay reference.
-* Investigation and verification observations.
-
-Default evidence capture excludes secrets, authorization headers, cookies, passwords, payment data, unrestricted request bodies, and unrelated browser storage.
-
-A redaction layer runs before sensitive values can enter durable evidence or UI projection.
-
-## 14. Evidence integrity and provenance
-
-Each durable artifact receives a SHA256 digest. The final run manifest records artifact identity and digest. The UI reads evidence through the run store and verifies artifact identity rather than selecting a convenient file by name or timestamp.
-
-The validation report records the exact source revision, validation profile, run identity, fixture version where applicable, and important runtime versions.
-
-Historical artifacts do not satisfy a fresh validation gate after relevant source changes.
-
-## 15. Outcome classification
-
-VERIFIED requires that the alleged defect was observed during the investigation and independently reproduced in the clean verification session.
-
-REPRODUCED means the first investigation observed the defect but the clean verification session did not establish it again.
-
-NOT_REPRODUCED means the system completed enough of the intended workflow to test the allegation and did not observe the alleged defect.
-
-INCONCLUSIVE means trustworthy determination is not possible because the workflow is blocked, ambiguous, unavailable, externally interrupted, or otherwise lacks sufficient authoritative evidence.
-
-When evidence conflicts, uncertainty wins over fabricated confidence.
-
-## 16. Deterministic fixture system
-
-The full harness uses a controlled defective web application hosted inside a real Solari sandbox. The sandbox exposes the fixture through a Solari preview URL. Real Solari browsers then investigate that public fixture URL.
-
-Fixture production logic remains separate from ReproDocket production behavior. ReproDocket must not branch on fixture identity or contain special answers for seeded defects.
-
-Initial fixture scenarios include at least:
-
-| Scenario | Ground truth | Expected result |
-| --- | --- | --- |
-| Account save produces blank panel | Deterministic defect | VERIFIED |
-| Billing route refresh becomes 404 | Deterministic defect | VERIFIED |
-| Missing ZIP validation submits | Deterministic defect | VERIFIED |
-| Healthy profile save | Healthy flow | NOT_REPRODUCED |
-| Healthy login validation | Healthy flow | NOT_REPRODUCED |
-| Deliberately ambiguous report | Insufficient evidence | INCONCLUSIVE |
-
-The fixture set includes positive, negative, and boundary cases so an implementation that labels everything broken or everything healthy cannot pass.
-
-## 17. Validation authorities
-
-### 17.1 Static quality
-
-Required checks include TypeScript compilation, lint, formatting policy where adopted, package integrity, and secret scanning appropriate to the repository.
-
-### 17.2 Unit validation
-
-Unit tests cover pure and isolated behavior such as outcome classification, lifecycle transitions, manifest validation, evidence hashing, redaction, URL validation, state guards, and storage path safety.
-
-### 17.3 Local integration validation
-
-Integration tests cover Fastify routes, SSE delivery, run persistence, interrupted run recovery, evidence serving, local startup state, secret store boundaries, and server shutdown behavior.
-
-### 17.4 Local UI validation
-
-The actual ReproDocket UI is launched and exercised through its normal browser boundary. Tests cover onboarding, new investigation entry, live status, run history, run detail, evidence rendering, replay state, failures, disabled states, restart and reload, and critical readability.
-
-### 17.5 Live Solari validation
-
-Live tests create actual Solari resources and prove session creation, navigation, interaction, screenshot collection, event collection, recording behavior, replay readiness behavior, release, and cleanup.
-
-Mocks cannot satisfy this authority.
-
-### 17.6 Full end to end validation
-
-The full authority performs the whole production shaped path:
-
-1. Start the local ReproDocket application.
-2. Create the real Solari sandbox fixture.
-3. Start the fixture server.
-4. Obtain and verify its public preview URL.
-5. Enter a scenario through the local user facing workflow.
-6. Create a real Solari investigation browser.
-7. Reproduce or reject the seeded condition.
-8. Persist investigation evidence.
-9. Close the first browser.
-10. Create a different real Solari verification browser.
-11. Execute verification.
-12. Persist verification evidence.
-13. Finalize classification and integrity metadata.
-14. Verify the result appears correctly in the actual local UI.
-15. Restart or reload as required and prove run persistence.
-16. Release browsers and kill the owned fixture sandbox.
-17. Verify cleanup.
-18. Verify evidence provenance and fresh source identity.
-
-## 18. Validation profiles
-
-TARGETED validation is permitted for bounded implementation slices when the claim is narrow. It runs the smallest sufficient real checks for the affected behavior.
-
-FULL validation is mandatory for milestone completion, broad integration claims, hardening completion, final product completion, and public release readiness.
-
-Running `validate.ps1` with no narrowing option means FULL validation.
-
-A failed mandatory stage returns a nonzero exit code and blocks a completion claim.
-
-## 19. Deliberate bug finding pass
-
-Functional implementation completion does not immediately graduate the product to final completion.
-
-After the complete vertical slice exists, a deliberate product wide bug finding pass covers every visible feature and supported user workflow. The pass is distinct from ordinary development testing and includes:
-
-* Visible feature inventory.
-* Dead control search.
-* Disconnected path search.
-* Stale state search.
-* Navigation trap search.
-* Persistence and reload search.
-* Contradictory label search.
-* Error state review.
-* Race and duplicate action review.
-* Resource lifetime review.
-* Secret and sensitive data leakage review.
-* Incorrect cross run evidence review.
-* Local process ownership review.
-* Solari session and sandbox leak review.
-* Restart and interruption review.
-* Browser back, refresh, and reopen behavior where applicable.
-* Public documentation versus runtime truth review.
-
-Every discovered defect is classified by root boundary. Shared infrastructure defects require adjacent consumer review rather than patching only the first visible symptom.
-
-## 20. Hardening pass
-
-Hardening is proportional to the actual risk and supported scope. The project avoids speculative security or infrastructure work that is not justified by a real boundary, failure mode, or supported capability.
-
-Mandatory hardening boundaries include:
-
-### 20.1 Local service security
-
-* Bind to loopback by default.
-* Reject unsupported target URL schemes.
-* Validate mutation request origin or use an equivalent local session protection mechanism.
-* Prevent arbitrary artifact path traversal.
-* Do not expose secrets through API responses.
-* Apply reasonable input length and shape limits.
-
-### 20.2 Secret protection
-
-* Protect stored Solari credentials using the operating system user boundary.
-* Redact credentials and sensitive headers from logs and evidence.
-* Verify public repository scans do not contain a real credential.
-
-### 20.3 Run and evidence safety
-
-* Use run scoped directories and generated identifiers.
-* Prevent one run from overwriting another run's evidence.
-* Write manifests and finalization state atomically where practical.
-* Preserve incomplete runs as INTERRUPTED rather than deleting them silently.
-* Detect malformed or tampered manifests and fail closed.
-
-### 20.4 Duplicate and concurrency behavior
-
-The initial supported scope allows one actively executing investigation pipeline per local application instance unless live testing demonstrates a clear need and safe design for parallel execution. Additional user requests are not silently discarded. They are rejected with an explicit current reason or queued through a deliberately implemented queue if that feature is completed. No hidden limit is permitted.
-
-### 20.5 Resource ownership
-
-* Track every owned Solari browser and sandbox.
-* Track the owned local server process.
-* Never kill unrelated processes to free a port.
-* Verify process identity before stop operations.
-* Reconcile cleanup after cancellation, exceptions, and shutdown.
-
-## 21. Failure injection
-
-The harness deliberately introduces representative failures and verifies the resulting lifecycle, classification, diagnostics, persistence, and cleanup.
-
-Required initial failure cases include:
-
-* Missing credential.
-* Invalid credential.
-* Solari browser creation failure.
-* Navigation timeout.
-* Target HTTP failure.
-* Browser failure during investigation.
-* Local evidence write failure.
-* Verification browser unavailable.
-* Recording not immediately ready.
-* Sandbox creation failure.
-* Fixture server startup failure.
-* Local preferred port occupied.
-* Application interruption during an active run.
-* Malformed persisted run.
-* Missing evidence artifact.
-* Cross run artifact mismatch.
-
-The test expectation is not merely that an exception occurred. Each scenario defines expected user visible behavior, durable state, resource cleanup, and resumable next action where applicable.
-
-## 22. Second validation pass
-
-After the deliberate bug finding and hardening passes, the product is validated again from a fresh current source state.
-
-The second validation is not allowed to reuse stale success evidence from before hardening. Any change to shared lifecycle, evidence, storage, capture, state projection, or validation infrastructure invalidates dependent prior evidence and requires the relevant profile to be rerun.
-
-Final release readiness follows this order:
+Run detail exposes, when applicable:
 
 ```text
-front to back implementation
-  -> integration closure
-  -> FULL validation
-  -> deliberate bug finding audit
-  -> bounded repairs
-  -> targeted regression for each repair
-  -> proportional hardening
-  -> fresh FULL validation
-  -> human visual and usability review
-  -> any escaped defect repairs plus harness coverage repairs
-  -> fresh affected validation
-  -> final FULL validation
-  -> documentation and publication audit
+run lifecycle
+investigation result
+verification result
+final outcome
+reproduction/expectation plan
+screenshots
+console evidence
+page errors
+network evidence
+timeline
+replay state
+report
+cleanup result
+limitations/errors
 ```
 
-## 23. Visual and usability proof
+Every visible interaction either performs real behavior, is truthfully disabled with a current reason, or is absent. No placeholder/dead controls are used for presentation value.
 
-ReproDocket itself is part of the product under test. Backend success does not prove that the local result is understandable or usable.
+## 19. Horizontal and vertical integration
 
-Milestone evidence includes the real current interface for:
+### Vertical
 
-* First run connection state.
-* New Investigation.
-* Active Investigation.
-* VERIFIED result.
-* REPRODUCED result where a deterministic scenario can produce it.
-* NOT_REPRODUCED result.
-* INCONCLUSIVE result.
-* History.
-* Evidence detail.
-* Relevant error states.
-
-Automated checks cover deterministic facts such as overflow, missing critical controls, incorrect outcome state, missing evidence, and broken navigation. Human review remains a separate authority for subjective readability and polish.
-
-Background safe browser automation is preferred. Automation must not move the user's mouse, type into unrelated active applications, or silently escalate to foreground ownership. Foreground interaction is used only where the exact native behavior requires it and must be explicit and minimal.
-
-## 24. Bootstrap and preflight
-
-The small bootstrap entry point remains capable of starting on a normal Windows system where only Windows PowerShell may initially be present. It detects PowerShell 7, installs or routes to it when safely possible, and performs substantive work under PowerShell 7.
-
-Preflight validates actual behavior rather than executable presence. It checks supported runtime versions, command execution, package tooling, disk capacity, write access, dependency restoration, application startup capability, credential readiness, and real Solari connectivity where the selected profile requires it.
-
-WMIC is prohibited. Modern PowerShell, CIM, and appropriate .NET APIs are used.
-
-A failed preflight explains the exact blocking condition and safe remediation.
-
-## 25. Local process ownership
-
-The running local application writes an ownership record containing enough information to distinguish its process from a recycled PID or unrelated process. This includes process identifier, process start identity, port, repository or application identity, and an instance nonce or equivalent.
-
-`stop.ps1` verifies ownership before terminating anything.
-
-## 26. Run storage
-
-Normal user data is stored outside the repository under the user's local application data path.
-
-Conceptual layout:
+A supported run is not complete until the entire path is proven:
 
 ```text
-ReproDocket/
-  secrets/
-  runs/
-    <run-id>/
-      run.json
-      investigation/
-        screenshots/
-        console.json
-        network.json
-        timeline.json
-        replay.json
-      verification/
-        screenshots/
-        console.json
-        network.json
-        timeline.json
-        replay.json
-      report/
-        report.html
-        report.json
-      integrity.json
+local UI
+-> request validation
+-> run admission/persistence
+-> Solari investigation
+-> evidence capture
+-> first cleanup
+-> fresh Solari verification
+-> evidence/classification
+-> report/integrity finalization
+-> local UI/history
+-> reload/restart
+-> resource reconciliation
+-> user return path
 ```
 
-Generated validation artifacts use scoped ignored output and remain bounded. Routine source control does not accumulate screenshots, recordings, browser dumps, or transient logs.
+### Horizontal
 
-## 27. Reporting
-
-The local report is understandable without terminal history or hidden reasoning. It states:
-
-* Target.
-* Reported problem.
-* Lifecycle result.
-* Investigation result.
-* Verification result.
-* Final outcome.
-* Reproduction steps.
-* Key evidence.
-* Replay availability.
-* Session cleanup result.
-* Run duration.
-* Relevant limitations or blockers.
-
-Machine readable JSON and human readable HTML are generated from the same authoritative run data.
-
-## 28. Documentation truth
-
-README, ReproDocket documentation, capability wording, UI state, validation output, release notes, and public descriptions must agree.
-
-A feature is not documented as available merely because a class, route, button, unit test, or partial happy path exists.
-
-Maturity terminology is:
-
-* Planned.
-* Foundation.
-* In Progress.
-* Available (Unhardened).
-* Available.
-
-Available requires complete supported workflow, integration, persistence and lifecycle behavior where applicable, failure handling, recovery, resource closure, validation, documentation, and no known category level hardening blocker.
-
-## 29. Git and publication behavior
-
-Implementation occurs on a scoped feature branch until an intentional integration decision is made.
-
-Before each commit, repository state is inspected, only related files are staged, required current validation is checked, and the staged diff is reviewed for whitespace and accidental artifacts. Generated evidence and secrets remain untracked.
-
-A commit is not created merely to checkpoint a failing slice unless repository policy explicitly requires otherwise. Normal descriptive commits are preferred.
-
-Publication or merge must verify remote state, branch divergence, repository hygiene, upstream attribution, license preservation, and current evidence.
-
-## 30. Milestones and gates
-
-### M0 Foundation
-
-Required before completion:
-
-* Project structure established.
-* Bootstrap and preflight executable.
-* Build executable.
-* Unit harness executable.
-* Validation entry point executable.
-* Generated output policy established.
-* Failure exit codes proven.
-
-### M1 Local shell
-
-Required before completion:
-
-* One command starts ReproDocket.
-* One owned local process serves the complete application.
-* Default browser opens automatically.
-* First run and normal application surfaces are usable.
-* Restart and stop ownership are proven.
-
-### M2 Evidence core
-
-Required before completion:
-
-* Runs persist.
-* Runs reload.
-* Integrity metadata is produced.
-* Interrupted state survives restart.
-* Cross run evidence cannot be confused.
-* Local UI displays persisted evidence.
-
-### M3 Solari browser
-
-Required before completion:
-
-* Real Solari session creation proven.
-* Navigation and interaction proven.
-* Screenshot capture proven.
-* Event collection proven.
-* Recording and replay behavior proven to the current SDK boundary.
-* Cleanup proven.
-
-### M4 Fixture infrastructure
-
-Required before completion:
-
-* Real Solari sandbox created.
-* Controlled fixture hosted.
-* Public preview URL verified externally.
-* Fixture lifecycle cleanup proven.
-
-### M5 Investigation
-
-Required before completion:
-
-* Seeded defect workflows execute through the production investigation path.
-* Positive and negative cases are distinguished.
-* Evidence supports the observed first run result.
-
-### M6 Independent verification
-
-Required before completion:
-
-* Second Solari session identity differs from first.
-* Minimal reproduction is replayed cleanly.
-* Comparison logic is real.
-* VERIFIED cannot occur without evidence from both sessions.
-
-### M7 Complete local results UI
-
-Required before completion:
-
-* Current run progress visible.
-* Final outcome visible.
-* Screenshots visible.
-* Timeline visible.
-* Console evidence visible.
-* Network evidence visible.
-* Replay state visible.
-* History and reload visible.
-* No dead controls or placeholder surfaces.
-
-### M8 Bug finding and adversarial audit
-
-Required before completion:
-
-* Full visible feature inventory completed.
-* Horizontal and vertical connectivity matrix completed.
-* Failure injection suite completed.
-* Disconnected and stale paths repaired or truthfully classified.
-* Any harness gaps discovered by defects are repaired.
-
-### M9 Hardening
-
-Required before completion:
-
-* Security and privacy boundaries reviewed.
-* Resource ownership and lifetime reviewed.
-* Persistence and interruption reviewed.
-* Sensitive logging reviewed.
-* Duplicate and state transition behavior reviewed.
-* Proportional repairs complete.
-* No known ordinary workflow hardening blocker remains inside declared scope.
-
-### M10 Final proof
-
-Required before completion:
-
-* Fresh FULL validation passes after hardening.
-* Product UI visual and usability review completed.
-* Escaped defects produce both product fixes and corresponding regression coverage where automation could have caught them.
-* A final fresh FULL validation passes after any such repairs.
-* Exact source revision and evidence provenance recorded.
-* Documentation truth audit passes.
-
-### M11 Public release and submission
-
-Required before completion:
-
-* Upstream fork relationship and license preserved.
-* Root README clearly surfaces ReproDocket without erasing the cookbook lineage.
-* Setup is reproducible from a fresh checkout.
-* No secret or private machine information is public.
-* Current supported scope is stated truthfully.
-* Demonstrations use the real current product and real Solari path.
-* Any accompanying challenge submission follows the published submission requirements.
-
-## 31. Completion definition
-
-ReproDocket is front to back complete only when every visible supported feature is connected horizontally and vertically, the normal user can enter and complete the supported workflow, authoritative state reaches persistence and returns correctly to the UI, restart and recovery behavior works where applicable, real Solari resources are exercised, failures are diagnostic and safe, resources are closed, evidence is fresh and traceable, documentation agrees with runtime truth, and the complete current application survives the deliberate bug finding, hardening, and second validation sequence.
-
-A successful build, large passing unit count, one working API request, one screenshot, one fixture result, or one successful Solari session is insufficient by itself.
-
-## 32. Explicit stop conditions
-
-Broad feature expansion stops and the current blocker takes priority when any of the following is true:
-
-* A user visible path is broken or disconnected.
-* The harness is incapable of failing for a known seeded defect.
-* Evidence identity or provenance is uncertain.
-* A secret may have leaked.
-* Repository state is unknown and writing would risk unrelated work.
-* An owned external resource cannot be distinguished from unrelated state.
-* A shared infrastructure defect makes adjacent results untrustworthy.
-* A required validation authority reports failure.
-* A completion claim would rely on stale evidence.
-
-Unknown or subjective residuals are reported truthfully rather than converted into PASS.
-
-## 33. Final engineering sequence
-
-The intended implementation sequence is:
+Sibling surfaces must agree on the same authority:
 
 ```text
-inspect exact fork state
-  -> establish isolated project foundation
-  -> build executable harness first
-  -> complete zero configuration local shell
-  -> complete evidence persistence
-  -> complete live Solari browser lifecycle
-  -> complete Solari hosted deterministic fixture
-  -> complete investigation path
-  -> complete independent verification path
-  -> complete all local evidence views
-  -> run FULL validation
-  -> perform product wide bug finding and connectivity audit
-  -> repair discovered defects with regressions
-  -> harden demonstrated risk boundaries and declared scope
-  -> run fresh FULL validation
-  -> perform human visual and usability review
-  -> repair escaped defects and strengthen harness where applicable
-  -> run fresh affected validation and final FULL validation
-  -> reconcile documentation, repository, attribution, and publication state
-  -> prepare the public demonstration and submission
+active progress vs manifest
+history vs run detail
+outcome badge vs JSON/HTML report
+screenshot/console/network/timeline views vs owned artifacts
+replay control vs replay state
+cleanup display vs resource ledger
+provider readiness vs actual credential path
+validation summary vs exact source revision
+README capability wording vs current proven maturity
 ```
 
-The project does not skip directly from feature implementation to showcase preparation. Front to back completion, bug discovery, necessary hardening, and fresh revalidation are explicit phases of the product itself.
+A shared router/store/serializer/state/adapter defect triggers review of adjacent consumers rather than a one-screen cosmetic patch.
+
+A maintained connectivity matrix records discoverability, entry, prerequisite truth, action routing, feedback, authority, persistence, reload, recovery, return path, regression coverage, and remaining human QA for every visible feature.
+
+## 20. Validation authorities
+
+ReproDocket uses separate validation authorities:
+
+1. Static/repository quality.
+2. Unit behavior.
+3. Local integration.
+4. Built local UI user-boundary tests.
+5. Security/content/persistence failure tests.
+6. Real Solari browser contract tests.
+7. Real Solari sandbox/fixture contract tests.
+8. Full investigation/verification end-to-end tests.
+9. Horizontal connectivity checks.
+10. Vertical connectivity checks.
+11. Resource/lifetime checks.
+12. Fresh Windows bootstrap/start/stop checks.
+13. Harness sensitivity/mutation checks.
+14. Public-source/documentation audit.
+15. Human visual/usability acceptance where deterministic tests are insufficient.
+
+The complete catalog is defined in [`reprodocket-test-matrix.md`](reprodocket-test-matrix.md).
+
+## 21. Targeted and Full validation
+
+`TARGETED` validation runs the smallest sufficient real checks for a bounded change.
+
+`FULL` validation is required for broad milestone, hardening, final completion, and publication claims. Full includes live Solari authorities once the product reaches those phases.
+
+A mandatory `BLOCKED` or `FAIL` does not count as PASS.
+
+Human visual/usability acceptance remains a separate gate. Machine Full PASS is not renamed human PASS.
+
+## 22. Harness sensitivity
+
+Critical validators must prove they can fail. Representative deliberate mutations include:
+
+```text
+allow VERIFIED without verification evidence
+reuse the first session ID
+remove private-target blocking
+remove local request guard
+skip escaping/redaction
+serve a cross-run artifact
+skip evidence hashing
+allow duplicate pipelines
+swallow cleanup failure
+skip sandbox kill
+always classify broken
+always classify healthy
+hardcode fixture scenario outcome
+accept stale source revision evidence
+```
+
+A test that remains green under the defect it exists to guard is itself defective and must be strengthened.
+
+## 23. Bug-finding and hardening sequence
+
+Feature implementation does not immediately become release completion.
+
+The required sequence is:
+
+```text
+front-to-back implementation
+-> horizontal/vertical integration closure
+-> Full machine validation
+-> deliberate visible-feature and workflow bug audit
+-> defect repairs with regressions
+-> proportional security/lifecycle/persistence hardening
+-> fresh Full validation
+-> human visual/usability review
+-> escaped-defect repairs plus harness improvements
+-> affected validation
+-> final fresh Full validation
+-> documentation/publication audit
+```
+
+Hardening focuses on demonstrated risk and supported scope rather than speculative enterprise infrastructure.
+
+## 24. Visual and usability proof
+
+The ReproDocket interface is part of the product under test. Backend/API success cannot prove the result is understandable.
+
+Automated browser validation checks navigation, critical control availability, state consistency, overflow, basic accessibility semantics, keyboard reachability, responsive layouts, malicious-content inertness, and representative zoom/size behavior.
+
+Original-resolution product screenshots are prepared for human review from the same current build. Background-safe Playwright capture is preferred for this web UI; desktop-wide pointer/keyboard automation is unnecessary for ordinary layout claims.
+
+Human review judges readability, hierarchy, status clarity, evidence comprehensibility, affordance truth, error usefulness, and professional polish. Any escaped defect that automation could reasonably detect creates a regression/harness repair.
+
+## 25. Documentation and publication truth
+
+Public documentation must describe only current supported behavior. Planned architecture does not become a shipped capability claim.
+
+Maturity language may use:
+
+```text
+Planned
+Foundation
+In Progress
+Available (Unhardened)
+Available
+```
+
+`Available` requires the declared scope to be complete, integrated, persistent/recoverable where applicable, failure-aware, resource-clean, validated, documented, and free of known ordinary-scope hardening blockers.
+
+The root cookbook README will surface ReproDocket only after the project is genuinely usable, while preserving the upstream cookbook identity. ReproDocket receives its own README with setup, supported plan grammar, evidence model, validation scope, and limitations.
+
+Any challenge/social submission is prepared from the final validated product and remains a separate public-mutation decision.
+
+## 26. Detailed implementation sequence
+
+The authoritative implementation plan index is [`implementation/README.md`](implementation/README.md).
+
+Ordered plans:
+
+1. Foundation and local shell.
+2. Evidence, persistence, and local results.
+3. Solari browser and sandbox substrate.
+4. Investigation, independent verification, and complete end-to-end path.
+5. Deliberate bug finding, hardening, and final proof.
+6. Publication and challenge submission.
+
+The plans intentionally build executable validation alongside each capability rather than postponing the harness until the end.
+
+## 27. Completion definition
+
+ReproDocket version one is front-to-back complete only when every visible supported feature is connected horizontally and vertically; the normal user can enter, execute, inspect, reload, and leave the workflow; the two Solari attempts are independent; important evidence is locally persisted and traceable; failures are safe and diagnostic; cancellation/restart behavior is truthful; owned resources close; the harness detects representative deliberate regressions; the complete product survives the deliberate bug-finding/hardening/revalidation sequence; human UI acceptance is recorded; and public documentation agrees with the exact current runtime.
+
+A successful build, a large unit-test count, one working API request, one screenshot, one Solari session, or one happy-path fixture result is insufficient by itself.
