@@ -1,8 +1,25 @@
 node_modules/
 package-lock.json
+!reprodocket/package-lock.json
 .env
+.env.*
+!.env.example
 __pycache__/
 *.pyc
 .venv/
 venv/
 screenshot.png
+
+# ReproDocket generated output and local state
+reprodocket/dist/
+reprodocket/coverage/
+reprodocket/test-results/
+reprodocket/playwright-report/
+reprodocket/.artifacts/
+reprodocket/.runtime/
+reprodocket/.tmp/
+reprodocket/*.log
+
+# Never version local ReproDocket secrets or run data
+reprodocket/secrets/
+reprodocket/runs/
