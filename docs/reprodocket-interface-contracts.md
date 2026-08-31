@@ -3,32 +3,34 @@
 Date: August 31, 2026
 Status: Pre-implementation contract baseline
 
-This document fixes the initial public contracts between ReproDocket components before implementation. Types may be refined when the current SDK requires it, but semantic meanings must not drift silently.
+This document defines the initial contracts between ReproDocket components. Exact SDK-specific types may be refined after installed-package inspection, but the user-visible semantics, evidence requirements, and lifecycle meanings may not drift silently.
 
-## 1. Version one planning decision
+## 1. Version one execution model
 
-A browser cannot reliably infer arbitrary actions from only a URL and a freeform problem description without an actual planning system. ReproDocket version one therefore distinguishes the defect description from the executable reproduction plan.
+ReproDocket version one separates three things that must not be conflated:
 
-The complete supported version one path accepts:
+1. A human-readable defect description.
+2. An auditable browser reproduction plan.
+3. Explicit observable expectations that determine whether the reported condition was actually seen.
 
-* target URL,
-* problem description,
-* one or more auditable reproduction steps.
+The complete supported version-one request therefore contains:
 
-A future AI planner may convert freeform text into the same action plan, but it is not required for the initial product and cannot bypass evidence requirements.
+* a public HTTP/HTTPS target URL,
+* a problem description,
+* one or more executable reproduction steps,
+* one or more observation expectations.
 
-This keeps the first release truthful, zero-extra-credential, deterministic enough to validate, and centered on Solari execution.
+A browser does not reliably infer arbitrary actions or defect truth from freeform prose alone. A future AI planner may translate freeform text into the same visible plan and expectations, but it is not required for version one and it may never bypass the evidence/classification rules below.
 
-## 2. Reproduction step grammar
+## 2. User-facing plan grammar
 
-The initial user-facing step language is deliberately small. Each line is parsed independently.
+Each nonblank line is parsed independently. Keywords are case-insensitive. Quoted values preserve case.
 
-Supported forms:
+### Actions
 
 ```text
 OPEN "/account"
 CLICK "Account"
-CLICK "Save"
 FILL "Email" WITH "qa@example.com"
 SELECT "Country" VALUE "US"
 CHECK "I agree"
@@ -41,19 +43,30 @@ BACK
 FORWARD
 ```
 
-Keywords are case-insensitive. Quoted values preserve case.
+### Expectations
 
-`OPEN` accepts a path relative to the target origin or an absolute HTTP/HTTPS URL that passes the same target security policy.
+```text
+EXPECT_TEXT "Profile saved"
+EXPECT_NO_TEXT "Account details"
+EXPECT_URL "/billing/error"
+EXPECT_PAGE_ERROR "PROBE_ACCOUNT_SAVE_ERROR"
+EXPECT_MAIN_STATUS 200
+EXPECT_MAIN_STATUS 404
+```
 
-`CLICK` resolves by accessible role/name and visible text using a documented deterministic order. It does not silently execute the first of several equally plausible matches.
+Expectations are assertions about observed browser state. They do not directly set a result.
 
-`FILL`, `SELECT`, `CHECK`, and `UNCHECK` resolve by associated accessible label first. If no unique element is found, the action fails with an ambiguity or not-found diagnostic.
+`OPEN`, `WAIT_FOR_URL`, and `EXPECT_URL` accept relative paths or absolute allowed HTTP/HTTPS destinations. Absolute destinations pass the same target security policy as the initial URL.
 
-`WAIT_FOR_URL` accepts a relative path or absolute allowed URL.
+`CLICK` resolves by ordinary accessible semantics and a documented deterministic fallback. It must not silently choose the first of several equally plausible matches.
 
-Version one does not accept arbitrary JavaScript, arbitrary CSS selectors, shell commands, or direct DOM mutation in user-entered steps.
+`FILL`, `SELECT`, `CHECK`, and `UNCHECK` resolve by associated accessible label first. Ambiguous or missing targets fail diagnostically.
 
-## 3. Step parse model
+`PRESS` accepts a bounded allowlist of ordinary keys needed by the supported workflow. It is not arbitrary global keyboard injection.
+
+Version one does not accept arbitrary JavaScript, CSS/XPath selectors, shell commands, DOM mutation, file reads, or local-process commands in a user plan.
+
+## 3. Plan model
 
 ```ts
 export type ReproductionAction =
@@ -70,14 +83,23 @@ export type ReproductionAction =
   | { kind: "back" }
   | { kind: "forward" };
 
-export interface ParsedReproductionStep {
+export type ObservationExpectation =
+  | { kind: "expectText"; text: string }
+  | { kind: "expectNoText"; text: string }
+  | { kind: "expectUrl"; target: string }
+  | { kind: "expectPageError"; message: string }
+  | { kind: "expectMainStatus"; status: number };
+
+export type PlanStatement = ReproductionAction | ObservationExpectation;
+
+export interface ParsedPlanStatement {
   index: number;
   source: string;
-  action: ReproductionAction;
+  statement: PlanStatement;
 }
 ```
 
-An unsupported or malformed step is rejected before a Solari browser is created.
+Unsupported, malformed, empty, or trailing-garbage statements are rejected before a Solari browser is created.
 
 ## 4. Investigation request
 
@@ -85,30 +107,30 @@ An unsupported or malformed step is rejected before a Solari browser is created.
 export interface CreateRunRequest {
   targetUrl: string;
   problem: string;
-  steps: string[];
+  plan: string[];
 }
 ```
 
 Validation rules:
 
 ```text
-targetUrl: required, valid public HTTP/HTTPS URL, maximum 2048 UTF-16 code units before normalization
-problem: required, trimmed length 1..10000
-steps: required, 1..50 entries
-step: trimmed length 1..1000
+targetUrl: required; maximum 2048 UTF-16 code units before normalization
+problem: required; trimmed length 1..10000
+plan: required; 2..100 nonblank statements
+statement: trimmed length 1..1000
+plan must contain at least one ReproductionAction
+plan must contain at least one ObservationExpectation
 ```
 
-The application may later make steps optional only when an installed planner can generate and display a valid auditable `ReproductionAction[]` before execution.
+The server, not the UI, is the final request-validation authority.
 
 ## 5. Run identity
-
-Run IDs are generated by the server using UUID v4 or an equivalently collision-resistant standard identifier.
 
 ```ts
 export type RunId = string;
 ```
 
-User supplied values never become filesystem directory names directly.
+Run IDs are generated by the server with UUID v4 or an equivalently collision-resistant standard identifier. User input never directly becomes a filesystem path.
 
 ## 6. Lifecycle and outcome
 
@@ -136,30 +158,46 @@ export type AttemptOutcome =
   | "INCONCLUSIVE";
 ```
 
-`RunOutcome` is null until the classifier has enough evidence to finalize it.
+Lifecycle and defect outcome are separate authorities. A run can complete normally with `NOT_REPRODUCED`. A failed infrastructure run is not silently converted to `NOT_REPRODUCED`.
 
-`FAILED`, `CANCELLED`, and `INTERRUPTED` are lifecycle states, not defect outcomes.
-
-## 7. Error contract
+## 7. Observation result
 
 ```ts
-export interface ReproDocketErrorInfo {
-  code: ReproDocketErrorCode;
+export type ObservationStrength =
+  | "CONFIRMED"
+  | "NOT_OBSERVED"
+  | "INSUFFICIENT";
+
+export interface ExpectationResult {
+  statementIndex: number;
+  expectation: ObservationExpectation;
+  satisfied: boolean | null;
+  evidenceIds: string[];
   message: string;
-  retryable: boolean;
-  stage?: RunLifecycle;
-  details?: Record<string, string | number | boolean | null>;
+}
+
+export interface AttemptObservation {
+  strength: ObservationStrength;
+  summary: string;
+  supportingEvidenceIds: string[];
+  expectations: ExpectationResult[];
+  reasonCode: string;
 }
 ```
 
-Initial stable codes:
+`CONFIRMED` requires current evidence that satisfies the plan's defect-defining expectation set. `NOT_OBSERVED` requires the relevant workflow and expectations to have been exercised sufficiently to make a negative determination. Missing/ambiguous authority is `INSUFFICIENT`.
+
+Console warnings, console errors, failed subrequests, or a successful action sequence are evidence but are not automatic proof of the reported defect unless an explicit expectation makes the observation relevant.
+
+## 8. Error contract
 
 ```ts
 export type ReproDocketErrorCode =
   | "INVALID_REQUEST"
   | "INVALID_TARGET_URL"
   | "BLOCKED_TARGET_NETWORK"
-  | "INVALID_REPRODUCTION_STEP"
+  | "INVALID_PLAN_STATEMENT"
+  | "PLAN_EXPECTATION_REQUIRED"
   | "AMBIGUOUS_TARGET_ELEMENT"
   | "TARGET_ELEMENT_NOT_FOUND"
   | "SOLARI_CREDENTIAL_MISSING"
@@ -181,11 +219,48 @@ export type ReproDocketErrorCode =
   | "LOCAL_PORT_UNAVAILABLE"
   | "LOCAL_REQUEST_REJECTED"
   | "INTERNAL_ERROR";
+
+export interface ReproDocketErrorInfo {
+  code: ReproDocketErrorCode;
+  message: string;
+  retryable: boolean;
+  stage?: RunLifecycle;
+  details?: Record<string, string | number | boolean | null>;
+}
 ```
 
-Unknown exceptions are mapped to `INTERNAL_ERROR` with sanitized public text. Raw stack traces never become API response payloads.
+Unknown exceptions become `INTERNAL_ERROR` with sanitized public text. Raw stack traces do not become API payloads.
 
-## 8. Attempt contract
+## 9. Step execution
+
+```ts
+export interface StepExecutionContext {
+  baseUrl: URL;
+  attemptId: string;
+  signal: AbortSignal;
+}
+
+export interface StepExecutionResult {
+  statementIndex: number;
+  startedAt: string;
+  finishedAt: string;
+  urlBefore: string;
+  urlAfter: string;
+  summary: string;
+}
+
+export interface ReproductionStepExecutor {
+  execute(
+    page: unknown,
+    step: ParsedPlanStatement,
+    context: StepExecutionContext,
+  ): Promise<StepExecutionResult>;
+}
+```
+
+Only action statements are executed by the action executor. Expectations are evaluated by the observer against current browser/evidence state. The concrete page type replaces `unknown` with the exact installed Solari Browser SDK compatible type after contract inspection.
+
+## 10. Attempt record
 
 ```ts
 export interface AttemptRecord {
@@ -195,18 +270,18 @@ export interface AttemptRecord {
   startedAt: string | null;
   finishedAt: string | null;
   outcome: AttemptOutcome | null;
-  observation: string | null;
-  completedStepCount: number;
-  totalStepCount: number;
+  observation: AttemptObservation | null;
+  completedActionCount: number;
+  totalActionCount: number;
   evidenceIds: string[];
   replay: ReplayRecord;
   error: ReproDocketErrorInfo | null;
 }
 ```
 
-A verification attempt cannot reuse the investigation attempt ID or Solari session ID.
+A verification attempt cannot reuse the investigation attempt ID, browser object, page/context, or Solari session ID.
 
-## 9. Replay contract
+## 11. Replay contract
 
 ```ts
 export type ReplayState =
@@ -225,9 +300,9 @@ export interface ReplayRecord {
 }
 ```
 
-`READY_LOCAL` is used only when replay bytes have actually been retrieved and stored through a proven SDK path.
+`READY_LOCAL` is used only when replay bytes were actually retrieved and stored through a proven TypeScript SDK path.
 
-## 10. Evidence contract
+## 12. Evidence contract
 
 ```ts
 export type EvidenceKind =
@@ -255,11 +330,9 @@ export interface EvidenceArtifact {
 }
 ```
 
-`relativePath` is generated internally and validated to remain beneath the run directory.
+Artifact paths are generated internally and validated to remain beneath the owning run directory.
 
-An active run may contain `sealed: false` artifacts. Finalized run evidence must be sealed and hashed unless the artifact kind is explicitly non-durable.
-
-## 11. Console evidence
+## 13. Structured evidence entries
 
 ```ts
 export interface ConsoleEvidenceEntry {
@@ -268,26 +341,14 @@ export interface ConsoleEvidenceEntry {
   level: "warning" | "error";
   text: string;
 }
-```
 
-Info/debug console chatter is not persisted by default.
-
-## 12. Page error evidence
-
-```ts
 export interface PageErrorEvidenceEntry {
   sequence: number;
   occurredAt: string;
   name: string;
   message: string;
 }
-```
 
-Target stack traces are not required for version one and should not be persisted unless they can be sanitized reliably.
-
-## 13. Network evidence
-
-```ts
 export interface NetworkEvidenceEntry {
   sequence: number;
   occurredAt: string;
@@ -299,7 +360,7 @@ export interface NetworkEvidenceEntry {
 }
 ```
 
-Headers and request/response bodies are excluded from this contract.
+Authorization/cookie headers and request/response bodies are excluded from the initial durable network-evidence contract.
 
 ## 14. Timeline contract
 
@@ -309,6 +370,7 @@ export type TimelineEventKind =
   | "actionStarted"
   | "actionCompleted"
   | "actionFailed"
+  | "expectationEvaluated"
   | "evidenceCaptured"
   | "replayState"
   | "cleanup"
@@ -319,17 +381,20 @@ export interface TimelineEntry {
   occurredAt: string;
   kind: TimelineEventKind;
   summary: string;
-  stepIndex: number | null;
+  statementIndex: number | null;
   data?: Record<string, string | number | boolean | null>;
 }
 ```
 
-Sequence values are monotonic within a run and are assigned by the server authority.
+Sequence values are monotonic within a run and assigned by the server authority.
 
-## 15. Resource ownership contract
+## 15. Resource ownership
 
 ```ts
-export type OwnedResourceType = "solariBrowser" | "solariSandbox" | "localServer";
+export type OwnedResourceType =
+  | "solariBrowser"
+  | "solariSandbox"
+  | "localServer";
 
 export interface OwnedResourceRecord {
   type: OwnedResourceType;
@@ -341,13 +406,7 @@ export interface OwnedResourceRecord {
   lastKnownState: string;
   cleanupError: ReproDocketErrorInfo | null;
 }
-```
 
-Resource IDs come from authoritative creation results. Cleanup never selects an arbitrary account resource solely by similarity or age.
-
-## 16. Cleanup contract
-
-```ts
 export interface CleanupSummary {
   status: "NOT_STARTED" | "IN_PROGRESS" | "PASS" | "FAIL" | "PARTIAL";
   requiredResourceCount: number;
@@ -357,9 +416,9 @@ export interface CleanupSummary {
 }
 ```
 
-A run's functional outcome and cleanup result are displayed separately.
+Functional outcome and cleanup result are displayed separately.
 
-## 17. Provenance contract
+## 16. Provenance
 
 ```ts
 export interface RunProvenance {
@@ -374,9 +433,9 @@ export interface RunProvenance {
 }
 ```
 
-Normal user runs may have `validationProfile: null`. Harness runs record the active validation profile.
+Normal user runs may use `validationProfile: null`; harness runs identify the active validation profile.
 
-## 18. Run manifest
+## 17. Run manifest
 
 ```ts
 export interface RunManifest {
@@ -388,11 +447,10 @@ export interface RunManifest {
   outcome: RunOutcome | null;
   targetUrl: string;
   problem: string;
-  sourceSteps: string[];
-  parsedSteps: ParsedReproductionStep[];
+  sourcePlan: string[];
+  parsedPlan: ParsedPlanStatement[];
   investigation: AttemptRecord;
   verification: AttemptRecord | null;
-  derivedReproductionSteps: string[];
   evidence: EvidenceArtifact[];
   resources: OwnedResourceRecord[];
   cleanup: CleanupSummary;
@@ -401,11 +459,9 @@ export interface RunManifest {
 }
 ```
 
-The manifest is the canonical durable run authority.
+The manifest is the canonical durable run authority. UI-only state does not become stronger run truth.
 
-UI-specific state does not become authoritative run truth.
-
-## 19. History summary contract
+## 18. History summary
 
 ```ts
 export interface RunSummary {
@@ -420,15 +476,158 @@ export interface RunSummary {
 }
 ```
 
-History is derived from validated run manifests, not a separate database that can drift from run detail state.
+History is derived from validated run manifests rather than a separate database that could drift from detail state.
 
-## 20. HTTP API
+## 19. Browser provider
 
-All API routes are served under `/api` from the same loopback origin as the built UI.
+```ts
+export interface RecordedBrowserHandle {
+  sessionId: string;
+  browser: unknown;
+  close(): Promise<void>;
+}
+
+export interface BrowserProvider {
+  createRecordedBrowser(
+    runId: RunId,
+    role: "investigation" | "verification",
+  ): Promise<RecordedBrowserHandle>;
+
+  getReplay(sessionId: string): Promise<ReplayRecord>;
+  close(): Promise<void>;
+}
+```
+
+Provider-level `close()` represents client disposal if the installed SDK requires it and must be idempotent.
+
+## 20. Fixture provider
+
+```ts
+export interface FixtureHandle {
+  sandboxId: string;
+  previewUrl: string;
+  fixtureVersion: string;
+  kill(): Promise<void>;
+}
+
+export interface FixtureProvider {
+  create(): Promise<FixtureHandle>;
+}
+```
+
+Fixture hosting is validation infrastructure, not a normal production dependency for arbitrary user targets.
+
+## 21. Evidence collector
+
+```ts
+export interface EvidenceCollector {
+  beginAttempt(runId: RunId, attemptId: string): Promise<void>;
+  captureScreenshot(label: string): Promise<EvidenceArtifact>;
+  recordConsole(entry: ConsoleEvidenceEntry): Promise<void>;
+  recordPageError(entry: PageErrorEvidenceEntry): Promise<void>;
+  recordNetwork(entry: NetworkEvidenceEntry): Promise<void>;
+  recordTimeline(entry: TimelineEntry): Promise<void>;
+  finishAttempt(): Promise<EvidenceArtifact[]>;
+}
+```
+
+Persistence remains behind the run/artifact store boundary even if the concrete collector subscribes directly to page events.
+
+## 22. Run store
+
+```ts
+export interface RunStore {
+  create(
+    request: CreateRunRequest,
+    parsedPlan: ParsedPlanStatement[],
+    provenance: RunProvenance,
+  ): Promise<RunManifest>;
+
+  get(runId: RunId): Promise<RunManifest>;
+  list(limit: number): Promise<RunSummary[]>;
+  update(
+    runId: RunId,
+    mutate: (current: RunManifest) => RunManifest,
+  ): Promise<RunManifest>;
+  writeArtifact(
+    runId: RunId,
+    artifactId: string,
+    bytes: Uint8Array,
+    mediaType: string,
+    label: string,
+    attemptId?: string,
+  ): Promise<EvidenceArtifact>;
+  seal(runId: RunId): Promise<RunManifest>;
+  recoverInterruptedRuns(currentInstanceId: string): Promise<RunSummary[]>;
+}
+```
+
+`update` enforces schema/lifecycle invariants before durable replacement.
+
+## 23. Attempt engine and observer
+
+```ts
+export interface DefectObserver {
+  observe(input: {
+    run: RunManifest;
+    attempt: AttemptRecord;
+    plan: ParsedPlanStatement[];
+  }): Promise<AttemptObservation>;
+}
+
+export interface AttemptEngine {
+  runAttempt(
+    run: RunManifest,
+    role: "investigation" | "verification",
+    plan: ParsedPlanStatement[],
+    signal: AbortSignal,
+  ): Promise<AttemptRecord>;
+}
+```
+
+Both attempts use identical action/expectation semantics. Verification gets a fresh browser rather than a privileged shortcut.
+
+## 24. Run coordinator
+
+```ts
+export interface RunCoordinator {
+  createAndStart(request: CreateRunRequest): Promise<RunManifest>;
+  cancel(runId: RunId): Promise<void>;
+  activeRunId(): RunId | null;
+  shutdown(): Promise<void>;
+}
+```
+
+One coordinator owns active-run admission for one local process.
+
+## 25. Final outcome classifier
+
+```ts
+export interface OutcomeClassifier {
+  classify(
+    investigation: AttemptRecord,
+    verification: AttemptRecord | null,
+  ): RunOutcome;
+}
+```
+
+Minimum decision table:
+
+```text
+investigation REPRODUCED + verification REPRODUCED -> VERIFIED
+investigation REPRODUCED + verification NOT_REPRODUCED -> REPRODUCED
+investigation REPRODUCED + verification INCONCLUSIVE -> REPRODUCED
+investigation NOT_REPRODUCED -> NOT_REPRODUCED
+investigation INCONCLUSIVE -> INCONCLUSIVE
+missing required reproduction evidence -> never VERIFIED
+same/non-independent session identity -> invariant violation, never VERIFIED
+```
+
+## 26. HTTP API
+
+All product APIs are served from the same loopback origin under `/api`.
 
 ### `GET /api/health`
-
-Response:
 
 ```ts
 export interface HealthResponse {
@@ -438,11 +637,9 @@ export interface HealthResponse {
 }
 ```
 
-This route does not expose secrets, absolute local paths, or provider account details.
+No absolute local paths or provider-account details.
 
 ### `GET /api/bootstrap`
-
-Response:
 
 ```ts
 export interface BootstrapResponse {
@@ -453,7 +650,7 @@ export interface BootstrapResponse {
 }
 ```
 
-`requestNonce` is process-local and required on mutation requests through `X-ReproDocket-Request`.
+The process-local nonce is sent on mutation requests as `X-ReproDocket-Request`.
 
 ### `GET /api/provider/solari`
 
@@ -468,34 +665,23 @@ export interface SolariProviderStatus {
 
 ### `PUT /api/provider/solari/credential`
 
-Request:
-
 ```ts
 export interface PutSolariCredentialRequest {
   apiKey: string;
 }
 ```
 
-Behavior:
-
-1. validate shape,
-2. verify against real Solari boundary,
-3. protect and store only after successful verification,
-4. return sanitized provider status.
-
-An environment-provided key cannot be overwritten through this endpoint; the UI explains that environment configuration is currently authoritative.
+The key is verified before protected local persistence. An environment-sourced key remains authoritative and cannot be overwritten through this endpoint.
 
 ### `DELETE /api/provider/solari/credential`
 
-Removes only the protected locally stored credential. It does not modify environment variables.
-
-If an environment credential exists, provider state remains sourced from Environment.
+Deletes only the protected local credential. It does not modify environment variables.
 
 ### `POST /api/runs`
 
-Request: `CreateRunRequest`
+Request: `CreateRunRequest`.
 
-Response status `202`:
+Accepted response (`202`):
 
 ```ts
 export interface CreateRunResponse {
@@ -504,19 +690,11 @@ export interface CreateRunResponse {
 }
 ```
 
-Admission is atomic. If another run is active, response is `409` with `RUN_ALREADY_ACTIVE`.
+Admission is atomic. A second active request returns `409` with `RUN_ALREADY_ACTIVE`.
 
 ### `GET /api/runs`
 
-Initial query contract:
-
-```text
-?limit=50
-```
-
-Maximum limit: 200.
-
-Response:
+Initial query: `?limit=50`; supported range 1..200; newest first.
 
 ```ts
 export interface ListRunsResponse {
@@ -524,17 +702,11 @@ export interface ListRunsResponse {
 }
 ```
 
-Runs are returned newest first.
-
 ### `GET /api/runs/:runId`
 
-Returns validated `RunManifest` or a damaged-run projection that cannot be mistaken for a valid manifest.
+Returns a validated run manifest or an explicit damaged-run projection that cannot be mistaken for a valid manifest.
 
 ### `POST /api/runs/:runId/cancel`
-
-Accepted only for the currently active matching run.
-
-Response:
 
 ```ts
 export interface CancelRunResponse {
@@ -543,27 +715,21 @@ export interface CancelRunResponse {
 }
 ```
 
-The response does not imply cleanup already finished.
+This acknowledges a request; it does not claim cleanup is already complete.
 
 ### `GET /api/runs/:runId/events`
 
-Server Sent Events stream.
-
-Each event has an SSE `id` equal to the run sequence number and a JSON `data` payload matching `RunEvent`.
+Server-Sent Events stream. Event IDs use the run sequence number.
 
 ### `GET /api/runs/:runId/artifacts/:artifactId`
 
-Serves only an artifact that belongs to the validated requested run.
-
-The artifact media type comes from the manifest, not the URL extension alone.
+Serves only an artifact owned by the validated requested run. Media type comes from the manifest.
 
 ### `GET /api/runs/:runId/report`
 
-Returns the run's generated HTML report when available. The report is static and script-free.
+Returns the run-owned generated static HTML report when available.
 
-## 21. API error envelope
-
-Non-success JSON API responses use:
+## 27. API error envelope
 
 ```ts
 export interface ApiErrorResponse {
@@ -571,9 +737,9 @@ export interface ApiErrorResponse {
 }
 ```
 
-No endpoint returns raw thrown objects.
+No route returns a raw thrown object.
 
-## 22. SSE contract
+## 28. SSE contract
 
 ```ts
 export type RunEventType =
@@ -595,187 +761,23 @@ export interface RunEvent {
 }
 ```
 
-The initial event after connection is always `snapshot` and contains enough current state for the client to render without assuming it saw prior events.
+The first event is `snapshot`. SSE improves immediacy but is not a second truth store. After reconnect/uncertainty the UI rehydrates with `GET /api/runs/:runId`.
 
-SSE is an optimization for immediacy, not the sole source of truth. After reconnect or uncertainty, the UI calls `GET /api/runs/:runId` and rehydrates from the authoritative manifest.
+## 29. Target observation rules
 
-## 23. Step executor interface
+The observation layer evaluates explicit expectation statements against current evidence/browser state. It must keep these boundaries:
 
-```ts
-export interface StepExecutionContext {
-  baseUrl: URL;
-  attemptId: string;
-  signal: AbortSignal;
-}
+* `EXPECT_TEXT` succeeds only when the text is observed in the intended current page state.
+* `EXPECT_NO_TEXT` succeeds only after the relevant action/window has completed and the text is verifiably absent.
+* `EXPECT_URL` compares normalized allowed final URL/path.
+* `EXPECT_PAGE_ERROR` matches sanitized current-attempt page errors, not historical or other-run logs.
+* `EXPECT_MAIN_STATUS` evaluates the current main-document navigation response status when observable.
 
-export interface StepExecutionResult {
-  stepIndex: number;
-  startedAt: string;
-  finishedAt: string;
-  urlBefore: string;
-  urlAfter: string;
-  summary: string;
-}
+If an expectation cannot be evaluated authoritatively, its result is `null`/insufficient rather than false success.
 
-export interface ReproductionStepExecutor {
-  execute(
-    page: unknown,
-    step: ParsedReproductionStep,
-    context: StepExecutionContext,
-  ): Promise<StepExecutionResult>;
-}
-```
+The product does not treat fixture route names as outcome instructions.
 
-The concrete page type should use the exact installed Solari Browser SDK's exported Playwright-compatible type rather than copying an incompatible Playwright type by assumption.
-
-## 24. Browser provider interface
-
-```ts
-export interface RecordedBrowserHandle {
-  sessionId: string;
-  browser: unknown;
-  close(): Promise<void>;
-}
-
-export interface BrowserProvider {
-  createRecordedBrowser(runId: RunId, role: "investigation" | "verification"): Promise<RecordedBrowserHandle>;
-  getReplay(sessionId: string): Promise<ReplayRecord>;
-  close(): Promise<void>;
-}
-```
-
-The implementation substitutes exact SDK types for `unknown` after installed type inspection.
-
-`close()` on the provider represents client-level shutdown if the installed SDK requires it. It must be idempotent.
-
-## 25. Fixture provider interface
-
-```ts
-export interface FixtureHandle {
-  sandboxId: string;
-  previewUrl: string;
-  fixtureVersion: string;
-  kill(): Promise<void>;
-}
-
-export interface FixtureProvider {
-  create(): Promise<FixtureHandle>;
-}
-```
-
-Fixture creation is validation infrastructure, not a normal user-facing ReproDocket requirement.
-
-## 26. Evidence collector interface
-
-```ts
-export interface EvidenceCollector {
-  beginAttempt(runId: RunId, attemptId: string): Promise<void>;
-  captureScreenshot(label: string): Promise<EvidenceArtifact>;
-  recordConsole(entry: ConsoleEvidenceEntry): Promise<void>;
-  recordPageError(entry: PageErrorEvidenceEntry): Promise<void>;
-  recordNetwork(entry: NetworkEvidenceEntry): Promise<void>;
-  recordTimeline(entry: TimelineEntry): Promise<void>;
-  finishAttempt(): Promise<EvidenceArtifact[]>;
-}
-```
-
-The concrete collector may subscribe directly to the actual page events, but persistence remains behind a run-store boundary.
-
-## 27. Run store interface
-
-```ts
-export interface RunStore {
-  create(request: CreateRunRequest, parsedSteps: ParsedReproductionStep[], provenance: RunProvenance): Promise<RunManifest>;
-  get(runId: RunId): Promise<RunManifest>;
-  list(limit: number): Promise<RunSummary[]>;
-  update(runId: RunId, mutate: (current: RunManifest) => RunManifest): Promise<RunManifest>;
-  writeArtifact(runId: RunId, artifactId: string, bytes: Uint8Array, mediaType: string, label: string, attemptId?: string): Promise<EvidenceArtifact>;
-  seal(runId: RunId): Promise<RunManifest>;
-  recoverInterruptedRuns(currentInstanceId: string): Promise<RunSummary[]>;
-}
-```
-
-`update` must enforce legal lifecycle and schema invariants before replacing durable state.
-
-## 28. Coordinator interface
-
-```ts
-export interface RunCoordinator {
-  createAndStart(request: CreateRunRequest): Promise<RunManifest>;
-  cancel(runId: RunId): Promise<void>;
-  activeRunId(): RunId | null;
-  shutdown(): Promise<void>;
-}
-```
-
-One coordinator owns active-run admission for the process.
-
-## 29. Attempt engine interface
-
-```ts
-export interface AttemptEngine {
-  runAttempt(
-    run: RunManifest,
-    role: "investigation" | "verification",
-    steps: ParsedReproductionStep[],
-    signal: AbortSignal,
-  ): Promise<AttemptRecord>;
-}
-```
-
-Both investigation and verification use the same action semantics. Verification differs by requiring a fresh browser and by comparing against the first attempt, not by using a privileged shortcut.
-
-## 30. Classifier interface
-
-```ts
-export interface OutcomeClassifier {
-  classify(investigation: AttemptRecord, verification: AttemptRecord | null): RunOutcome;
-}
-```
-
-Minimum rules:
-
-```text
-investigation REPRODUCED + verification REPRODUCED -> VERIFIED
-investigation REPRODUCED + verification NOT_REPRODUCED -> REPRODUCED
-investigation REPRODUCED + verification INCONCLUSIVE -> REPRODUCED
-investigation NOT_REPRODUCED -> NOT_REPRODUCED
-investigation INCONCLUSIVE -> INCONCLUSIVE
-missing required evidence for any claimed reproduction -> INCONCLUSIVE or lifecycle failure, never VERIFIED
-same session identity for both attempts -> invariant violation, never VERIFIED
-```
-
-## 31. Defect observation contract
-
-A browser action sequence completing is not by itself evidence that a bug occurred.
-
-Version one fixture scenarios define explicit observable defect cues that are independent from ReproDocket production code. Examples include:
-
-* a target region becomes empty when it should contain defined content,
-* an uncaught page error occurs after the specified action,
-* navigation lands on a known error route/status,
-* a prohibited form submission succeeds and exposes a target-side confirmation cue.
-
-For arbitrary user sites, ReproDocket version one records execution evidence and uses explicit observation rules available from the reproduction plan or supported built-in detectors. It must not invent a defect conclusion merely because a console warning or non-2xx request exists.
-
-This boundary is intentionally conservative.
-
-## 32. Built-in observation detectors
-
-The initial implementation may support these general detectors when relevant to the report/steps:
-
-```text
-uncaught page error after a step
-main document navigation to HTTP 4xx/5xx
-navigation timeout
-page unexpectedly closes/crashes
-explicit WAIT_FOR_TEXT failure
-explicit WAIT_FOR_URL failure
-```
-
-Network 4xx/5xx subrequests and console errors are evidence, not automatic proof of the reported defect on their own.
-
-## 33. Future AI planner boundary
+## 30. Future AI planner boundary
 
 A later planner may implement:
 
@@ -787,70 +789,69 @@ export interface InvestigationPlanner {
   }): Promise<{
     source: "ai";
     model: string;
-    steps: string[];
-    parsedSteps: ParsedReproductionStep[];
+    statements: string[];
+    parsedPlan: ParsedPlanStatement[];
     rationale: string;
   }>;
 }
 ```
 
-Before execution, the generated plan must be validated by the same parser and target policy as user supplied steps.
+Before execution, generated statements pass the exact same parser and target policy as user-supplied statements. The visible generated plan becomes part of run provenance/evidence. A planner never sets attempt/final outcomes directly.
 
-The plan becomes visible evidence. The planner cannot directly set attempt outcome or final outcome.
+No AI planner is part of version one until its credential, privacy, cost, failure, and validation boundaries are explicitly designed and proven.
 
-No planner is considered part of version one until its credential, privacy, cost, failure, and deterministic validation story is complete.
+## 31. UI route contract
 
-## 34. UI route contract
-
-The client may use a lightweight router or stateful route handling. Initial routes are conceptually:
+Initial routes:
 
 ```text
-/                       new investigation or connection state
-/runs/:runId            active/completed run detail
+/                 new investigation or provider-connection state
+/runs/:runId      active/completed/damaged run detail
 ```
 
-History is available from the main shell and run detail rather than requiring a separate incomplete application section.
+History remains available through the main shell and run detail. Unknown local routes render a product-owned not-found state with working navigation rather than a raw server 404.
 
-Unknown routes render a local not-found state with navigation back to the application, not a raw server 404.
+## 32. UI authority rules
 
-## 35. UI state authority
-
-The UI may cache server responses for rendering performance, but it must not create a stronger status than the server authority.
-
-Examples:
+The client may cache for rendering, but it cannot display a stronger state than the server authority:
 
 ```text
 server PREPARING -> client cannot display COMPLETED
 server outcome null -> client cannot display VERIFIED
-replay PENDING -> client cannot show usable replay action
+replay PENDING -> client cannot show a ready replay action
 cleanup FAIL -> client cannot show cleanup PASS
+cancellation requested -> client cannot display CANCELLED until server persists it
 ```
 
-## 36. Accessibility contract
+## 33. Accessibility contract
 
-Critical controls use native semantic elements where practical.
+Minimum supported semantics:
 
-Required minimums:
-
-* every input has an associated visible label,
-* validation errors are associated with the relevant field,
-* status changes have an accessible live-region strategy that does not overwhelm screen-reader users,
-* all primary actions are keyboard reachable,
+* every input has a visible associated label,
+* field errors are associated with the relevant control,
+* primary actions are keyboard reachable,
 * focus remains visible,
-* outcome is communicated by text, not color alone,
-* evidence tabs/sections expose appropriate roles and names,
-* reduced motion is respected if progress animation is used.
+* outcomes are communicated by text rather than color alone,
+* progress uses a bounded accessible live-region strategy,
+* evidence sections expose appropriate names/roles,
+* reduced-motion preference is respected when motion is used.
 
-No formal accessibility compliance level is claimed without an actual audit.
+No formal accessibility conformance level is claimed without a scoped audit.
 
-## 37. Contract change rule
+## 34. Active-run capacity
 
-If implementation proves one of these contracts incompatible with the current Solari SDK or browser platform, the change must:
+Version one supports one executing investigation pipeline per local ReproDocket process. This is explicit supported capacity, not a hidden limit.
+
+A second create request while one run is active returns `RUN_ALREADY_ACTIVE`. It is not silently queued or dropped. History remains readable during active execution.
+
+## 35. Contract change rule
+
+If implementation proves a contract incompatible with the current Solari SDK/platform:
 
 1. identify the exact incompatible assumption,
 2. preserve the user-visible requirement where possible,
-3. update this document and the implementation plan,
-4. add or update a contract test,
-5. rerun affected vertical and horizontal validation.
+3. update this document and affected design/plan,
+4. add/update a contract regression test,
+5. rerun affected horizontal and vertical validation.
 
-A convenient implementation shortcut is not enough reason to weaken the contract.
+Convenience alone is not enough reason to weaken a contract.
