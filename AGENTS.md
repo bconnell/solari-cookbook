@@ -20,21 +20,23 @@ Read in this order:
 3. `docs/reprodocket-security-lifecycle.md`
 4. `docs/reprodocket-sdk-baseline.md`
 5. `docs/reprodocket-test-matrix.md`
-6. `docs/implementation/README.md`
-7. The currently active numbered implementation plan.
+6. `docs/implementation/00-contract-reconciliation.md`
+7. `docs/implementation/README.md`
+8. The currently active numbered implementation plan.
 
-If plan prose conflicts with a newer contract/design document, stop and reconcile the documentation before implementing the conflicting behavior.
+If plan prose conflicts with a newer contract/design document, stop and reconcile the documentation before implementing the conflicting behavior. The mandatory pre-implementation reconciliation file resolves known transitional names and stale assumptions in the numbered plans.
 
 ## Required implementation order
 
-Implement the numbered plans in `docs/implementation/` in order.
+Complete `docs/implementation/00-contract-reconciliation.md`, then implement numbered plans 1 through 6 in order.
 
 Do not skip directly to demo/publication work because an intermediate happy path works.
 
 The intended sequence is:
 
 ```text
-foundation/local shell
+contract reconciliation
+-> foundation/local shell
 -> local evidence/persistence/UI
 -> real Solari browser/sandbox substrate
 -> full investigation + fresh verification
@@ -54,6 +56,8 @@ public HTTP/HTTPS target URL
 problem description
 auditable reproduction + observation plan
 ```
+
+The plan is required and must contain at least one browser action and at least one observation expectation.
 
 It then:
 
@@ -109,6 +113,8 @@ A console error, warning, failed subrequest, or successful action sequence is ev
 ## Version-one plan grammar
 
 Implement only the grammar defined in `docs/reprodocket-interface-contracts.md`.
+
+The first parser implementation uses the unified `PlanStatement` / `ParsedPlanStatement` model and `parsePlanStatements()`. Do not create a competing `ParsedReproductionStep` model from older plan prose.
 
 Do not add arbitrary JavaScript, CSS/XPath selectors, shell execution, local filesystem reads, or generic computer-control commands to the user plan language.
 
@@ -283,6 +289,8 @@ Do not claim:
 * screenshots are automatically privacy-safe,
 * universal SSRF prevention when provider/DNS visibility limits the enforceable boundary,
 * a feature is Available when its ordinary end-to-end/lifecycle/failure/validation work is incomplete.
+
+Detailed implementation plans are development artifacts rather than capability evidence. Before final publication, explicitly decide whether they improve the public repository; do not let internal execution material become part of the final presentation by accident.
 
 ## Stop conditions
 
