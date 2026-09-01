@@ -2,30 +2,35 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Complete the real ReproDocket user workflow from an auditable reproduction plan through a recorded Solari investigation, fresh independent verification, evidence-backed outcome, local report, durable history, cancellation, and full UI projection.
+**Goal:** Complete the real ReproDocket workflow from a required auditable action-and-expectation plan through a recorded Solari investigation, fresh independent verification, evidence-backed outcome, local report/history, cancellation, and full UI projection.
 
-**Architecture:** One `RunCoordinator` owns admission and cancellation. A shared `AttemptEngine` executes the same parsed action semantics for investigation and verification, but each attempt receives a separately created recorded Solari browser. Evidence and run state are persisted through the existing stores, and the final `OutcomeClassifier` can only promote a run to VERIFIED when both independent attempts contain sufficient reproduction evidence.
+**Architecture:** One `RunCoordinator` owns admission, lifecycle, cancellation, and finalization. A shared `AttemptEngine` executes only `ReproductionAction` statements and evaluates the already-final `ObservationExpectation` statements through the observer. Investigation and verification each receive a separately created recorded Solari browser. The final classifier may return `VERIFIED` only when both independent attempts contain sufficient matching reproduction evidence and distinct non-null Solari session IDs.
 
-**Tech Stack:** TypeScript, Fastify, React, Vitest, Playwright Test, `@solarisdk/browser`, existing ReproDocket storage/evidence/report infrastructure.
+**Tech Stack:** TypeScript, Fastify, React, Vitest, Playwright Test, `@solarisdk/browser`, and the ReproDocket storage/evidence/report infrastructure established in Plans 1 through 3.
 
-**Spec:** `docs/reprodocket-design.md`; contracts: `docs/reprodocket-interface-contracts.md`; security/lifecycle: `docs/reprodocket-security-lifecycle.md`; tests: `docs/reprodocket-test-matrix.md`; Solari baseline: `docs/reprodocket-sdk-baseline.md`.
+**Specs:** `docs/reprodocket-design.md`, `docs/reprodocket-interface-contracts.md`, `docs/reprodocket-data-handling.md`, `docs/reprodocket-security-lifecycle.md`, `docs/reprodocket-sdk-baseline.md`, `docs/reprodocket-fixture-spec.md`, `docs/reprodocket-ui-spec.md`, `docs/reprodocket-test-matrix.md`, and `docs/implementation/00-contract-reconciliation.md`.
 
 ## Global Constraints
 
-* Plans 1 through 3 must be freshly green for their applicable authorities before this work begins.
-* Version one executes only the documented reproduction-step grammar. It does not invent arbitrary browser actions from freeform prose.
-* The first and second attempts use different Solari session identities and newly created pages/browser state.
-* No outcome is inferred from a transport success, a console warning, or a failed subrequest alone.
-* VERIFIED requires evidence from both attempts and different non-null Solari session IDs.
-* The user-facing workflow must be exercised through the built local UI in end-to-end tests.
+* Plans 1 through 3 must have current passing evidence for their applicable gates before this plan begins.
+* Version one accepts a required unified plan containing at least one `ReproductionAction` and at least one `ObservationExpectation`.
+* The expectation grammar is already finalized: `EXPECT_TEXT`, `EXPECT_NO_TEXT`, `EXPECT_URL`, `EXPECT_PAGE_ERROR`, and `EXPECT_MAIN_STATUS`.
+* Do not introduce the obsolete `ParsedReproductionStep`, `ReproductionStepParser`, or `INVALID_REPRODUCTION_STEP` naming.
+* Version one executes the documented plan. It does not invent arbitrary browser actions from freeform prose.
+* User-authored plan values are persisted and must use nonsecret test data.
+* The first and second attempts use different Solari session identities and new browser/page state.
+* No outcome is inferred merely from transport success, a warning, a console error, or a failed subrequest.
+* `VERIFIED` requires sufficient supporting evidence from both attempts plus different non-null Solari session IDs.
+* The user-facing workflow is exercised through the built local UI in end-to-end tests.
 * Cancellation is a supported lifecycle path, not a process-kill shortcut.
-* Browser/sandbox cleanup remains mandatory even when reproduction or verification fails.
-* Every state shown by the UI comes from the same authoritative run manifest or an explicit damaged-run projection.
-* A functional result is not enough if persistence, report generation, history, reload, cleanup, or return navigation is disconnected.
+* Browser and sandbox cleanup remain mandatory even when functional reproduction/verification fails.
+* Every state shown by the UI comes from the authoritative run manifest or an explicit damaged-run projection.
+* A functional result is incomplete if report generation, persistence, history, reload, cleanup, or return navigation is disconnected.
+* Critical tests receive an actual sensitivity/mutation proof where the test matrix requires one.
 
 ---
 
-## Task 1: Implement deterministic reproduction-step execution
+## Task 1: Implement deterministic action execution and accessible target resolution
 
 **Files:**
 - Create: `reprodocket/src/core/ReproductionStepExecutor.ts`
@@ -34,22 +39,23 @@
 - Test: `reprodocket/tests/integration/ReproductionStepExecutor.test.ts`
 
 **Interfaces:**
-- Implements `ReproductionStepExecutor.execute(page, step, context)` from `docs/reprodocket-interface-contracts.md`.
-- Produces `StepExecutionResult` with exact before/after URLs and timing.
-- Uses the exact installed Solari Playwright-compatible page type established in Plan 3 rather than importing an incompatible type by assumption.
+- Implements `ReproductionStepExecutor.execute(page, step, context)` from the interface contract.
+- Receives only a parsed `ReproductionAction`, never an `ObservationExpectation`.
+- Produces `StepExecutionResult` with before/after URL and timing.
+- Uses the exact installed Solari Playwright-compatible page type proven in Plan 3.
 
-- [ ] **Step 1: Write failing resolver tests**
+- [ ] **Step 1: Write failing locator-resolution tests**
 
-Test the resolution policy independently from Solari with a Playwright-compatible local fixture:
+Require these semantics:
 
 ```text
-CLICK -> unique accessible button/link name first, then unique visible text fallback
-FILL -> unique associated label first
-SELECT -> unique associated label first
-CHECK/UNCHECK -> unique associated label first
-multiple equally valid matches -> AMBIGUOUS_TARGET_ELEMENT
-no match -> TARGET_ELEMENT_NOT_FOUND
-hidden-only match -> not accepted as the ordinary target
+CLICK -> unique accessible button/link/name first, then one unique visible text fallback
+FILL -> unique associated accessible label
+SELECT -> unique associated accessible label
+CHECK/UNCHECK -> unique associated accessible label
+multiple plausible visible matches -> AMBIGUOUS_TARGET_ELEMENT
+no valid visible match -> TARGET_ELEMENT_NOT_FOUND
+hidden-only match -> not accepted
 ```
 
 - [ ] **Step 2: Prove RED**
@@ -60,13 +66,13 @@ npm run test:unit -- AccessibleLocatorResolver.test.ts
 
 Expected: FAIL because the resolver does not exist.
 
-- [ ] **Step 3: Implement deterministic accessible resolution**
+- [ ] **Step 3: Implement accessible resolution**
 
-Use ordinary user-facing semantics. Do not accept arbitrary CSS/XPath from the reproduction grammar. A fallback from accessible name to text must still require one unique visible target.
+Use ordinary user-facing semantics and deterministic uniqueness. Do not accept arbitrary CSS/XPath from the plan. Do not silently choose the first ambiguous element.
 
-- [ ] **Step 4: Write failing step-executor integration tests**
+- [ ] **Step 4: Write failing executor tests for every supported action**
 
-Cover every grammar action from `docs/reprodocket-interface-contracts.md`:
+Cover:
 
 ```text
 OPEN
@@ -83,7 +89,7 @@ BACK
 FORWARD
 ```
 
-Use a local deterministic test page and verify observable browser state after each action. Test cancellation through an already-aborted `AbortSignal` and an abort during a wait.
+Use a local deterministic Playwright-compatible page. Verify observable state after each action. Include already-aborted and mid-wait cancellation tests.
 
 - [ ] **Step 5: Prove RED**
 
@@ -91,26 +97,29 @@ Use a local deterministic test page and verify observable browser state after ea
 npm run test:integration -- ReproductionStepExecutor.test.ts
 ```
 
-- [ ] **Step 6: Implement the executor**
+- [ ] **Step 6: Implement action execution**
 
-Before each action, check `AbortSignal`. Capture URL before and after. Use stage-specific timeouts. `OPEN` and `WAIT_FOR_URL` must apply the same target URL/network policy to absolute destinations and enforce same allowed-origin/network boundaries after redirects where authoritative data is available.
+Check the abort signal before each action and during waits. Use stage-specific timeouts. Capture before/after URL. `OPEN` and absolute `WAIT_FOR_URL` destinations pass the same target policy as the initial URL. Main-frame redirects are revalidated at the strongest authority proven by Plan 3 and later hardening.
 
-`PRESS` accepts only a bounded allowlist of normal keyboard names needed by the supported grammar. It must not become an arbitrary chord/injection language.
+`PRESS` uses a bounded allowlist of ordinary keys required by supported workflows. It is not arbitrary global keyboard injection.
 
-- [ ] **Step 7: Add ambiguity, timeout, and blocked-navigation tests**
+- [ ] **Step 7: Add explicit error-path tests**
 
-Require stable error codes:
+Require stable codes for:
 
 ```text
 AMBIGUOUS_TARGET_ELEMENT
 TARGET_ELEMENT_NOT_FOUND
 ACTION_TIMEOUT
 BLOCKED_TARGET_NETWORK
+ACTION_OUTCOME_UNKNOWN
 ```
 
-- [ ] **Step 8: Prove GREEN and mutation sensitivity**
+A target-mutating action whose outcome is unknown must not be silently retried.
 
-Temporarily change the resolver to choose the first of two ambiguous matching buttons. Confirm the ambiguity test fails. Restore and rerun.
+- [ ] **Step 8: Prove GREEN and resolver sensitivity**
+
+Temporarily change the resolver to choose the first of two ambiguous buttons. Confirm the ambiguity test fails. Restore and rerun:
 
 ```powershell
 npm run test:unit -- AccessibleLocatorResolver.test.ts
@@ -123,54 +132,48 @@ npm run typecheck
 ```powershell
 git add reprodocket/src/core/ReproductionStepExecutor.ts reprodocket/src/core/AccessibleLocatorResolver.ts reprodocket/tests/unit/AccessibleLocatorResolver.test.ts reprodocket/tests/integration/ReproductionStepExecutor.test.ts
 git diff --cached --check
-git commit -m "feat: execute auditable reproduction steps"
+git commit -m "feat: execute auditable ReproDocket actions"
 ```
 
 ---
 
-## Task 2: Implement evidence-backed defect observation
+## Task 2: Implement the finalized expectation observer
 
 **Files:**
 - Create: `reprodocket/src/core/DefectObserver.ts`
-- Create: `reprodocket/src/shared/contracts/ObservationModels.ts`
 - Test: `reprodocket/tests/unit/DefectObserver.test.ts`
 
 **Interfaces:**
-- Produces `observeAttempt(input): AttemptObservation`.
-- Consumes completed/failed step results and normalized evidence, not raw target HTML.
+- Consumes `ObservationExpectation`, `ExpectationResult`, `AttemptObservation`, normalized evidence, and current browser state from the existing shared contracts.
+- Produces `AttemptObservation` with `CONFIRMED`, `NOT_OBSERVED`, or `INSUFFICIENT` strength.
 - Does not own final two-attempt classification.
 
-- [ ] **Step 1: Define the attempt observation type in a failing test**
+- [ ] **Step 1: Write failing tests for every expectation primitive**
 
-Required semantic values:
-
-```ts
-export type ObservationStrength = "CONFIRMED" | "NOT_OBSERVED" | "INSUFFICIENT";
-
-export interface AttemptObservation {
-  strength: ObservationStrength;
-  summary: string;
-  supportingEvidenceIds: string[];
-  reasonCode: string;
-}
-```
-
-- [ ] **Step 2: Write failing detector tests**
-
-Initial general detectors:
+Cover the already-final grammar:
 
 ```text
-uncaught page error after the relevant action -> may confirm when the report/fixture expectation declares that cue
-main-document navigation to 4xx/5xx when the expected route should load -> may confirm
-page closes/crashes during required step -> may confirm
-WAIT_FOR_TEXT required postcondition succeeds -> evidence that expected healthy condition exists
-WAIT_FOR_TEXT required postcondition fails -> reproduction cue only when the report/fixture observation contract defines it
-WAIT_FOR_URL required postcondition fails -> same rule
-console warning alone -> never enough
-console error alone -> never enough for arbitrary defect
-subrequest 4xx/5xx alone -> never enough
-successful action sequence alone -> never enough
-insufficient cue -> INSUFFICIENT
+EXPECT_TEXT
+EXPECT_NO_TEXT
+EXPECT_URL
+EXPECT_PAGE_ERROR
+EXPECT_MAIN_STATUS
+```
+
+For each expectation test true, false, and insufficient-authority cases where applicable. Every `ExpectationResult` must retain the originating statement index and supporting evidence IDs.
+
+- [ ] **Step 2: Add anti-false-positive tests before implementation**
+
+Require:
+
+```text
+unrelated console warning alone -> not CONFIRMED
+unrelated console error alone -> not CONFIRMED
+unrelated failed subrequest alone -> not CONFIRMED
+successful action sequence alone -> not CONFIRMED
+missing required observation authority -> INSUFFICIENT
+explicit satisfied defect expectation with supporting evidence -> CONFIRMED
+complete workflow with tested defect expectation not observed -> NOT_OBSERVED
 ```
 
 - [ ] **Step 3: Prove RED**
@@ -179,39 +182,38 @@ insufficient cue -> INSUFFICIENT
 npm run test:unit -- DefectObserver.test.ts
 ```
 
-- [ ] **Step 4: Add explicit observation expectations to the parsed plan model**
+Expected: FAIL because the observer does not exist.
 
-Do not infer fixture outcomes from route names inside production code. Extend the run request/plan only with general, user-auditable expectation primitives if needed, such as:
+- [ ] **Step 4: Implement expectation evaluation without fixture identity knowledge**
 
-```text
-EXPECT_TEXT "Profile saved"
-EXPECT_NO_TEXT "Account details"
-EXPECT_URL "/billing/error"
-EXPECT_PAGE_ERROR "PROBE_ACCOUNT_SAVE_ERROR"
-EXPECT_MAIN_STATUS 200
+The observer evaluates general plan expectations only. It may correlate page errors, main-document status, current URL, and visible text to explicit expectations, but it must not inspect fixture route/scenario IDs to manufacture an answer.
+
+`EXPECT_PAGE_ERROR` matches the bounded normalized page-error contract. `EXPECT_MAIN_STATUS` refers to the current relevant main-document navigation response, not any subrequest. `EXPECT_URL` uses normalized allowed URL semantics. Text expectations use visible user-facing page state rather than arbitrary DOM serialization.
+
+- [ ] **Step 5: Implement conservative attempt strength**
+
+Return `CONFIRMED` only when the defect-defining expectation set has sufficient current evidence. Return `NOT_OBSERVED` only when the required workflow completed far enough to make a trustworthy negative determination. Otherwise return `INSUFFICIENT`.
+
+- [ ] **Step 6: Prove GREEN and seed one false-positive mutation**
+
+Temporarily make any console error force `CONFIRMED`. Confirm the anti-false-positive test fails. Restore and rerun:
+
+```powershell
+npm run test:unit -- DefectObserver.test.ts
+npm run typecheck
 ```
-
-If these are necessary, update `docs/reprodocket-interface-contracts.md`, parser tests, UI syntax help, and this plan before implementing them. The parser must remain closed and deterministic.
-
-- [ ] **Step 5: Implement observation truth conservatively**
-
-The observer returns CONFIRMED only when an explicit supported observation contract is satisfied by current evidence. Otherwise it returns NOT_OBSERVED when the relevant healthy expectation was actually tested, or INSUFFICIENT when no authoritative determination can be made.
-
-- [ ] **Step 6: Prove GREEN and anti-false-positive tests**
-
-Use a test containing an unrelated console error plus a successful expected postcondition and require NOT_OBSERVED, not CONFIRMED.
 
 - [ ] **Step 7: Commit**
 
 ```powershell
-git add reprodocket/src/core/DefectObserver.ts reprodocket/src/shared/contracts/ObservationModels.ts reprodocket/src/core/ReproductionStepParser.ts reprodocket/src/shared/contracts/ReproductionAction.ts reprodocket/tests/unit/DefectObserver.test.ts reprodocket/tests/unit/ReproductionStepParser.test.ts docs/reprodocket-interface-contracts.md
+git add reprodocket/src/core/DefectObserver.ts reprodocket/tests/unit/DefectObserver.test.ts
 git diff --cached --check
-git commit -m "feat: classify defect observations from evidence"
+git commit -m "feat: evaluate ReproDocket defect expectations"
 ```
 
 ---
 
-## Task 3: Build one real attempt engine
+## Task 3: Build the production AttemptEngine
 
 **Files:**
 - Create: `reprodocket/src/core/AttemptEngine.ts`
@@ -219,29 +221,31 @@ git commit -m "feat: classify defect observations from evidence"
 - Test: `reprodocket/tests/live/AttemptEngine.live.test.ts`
 
 **Interfaces:**
-- Implements `AttemptEngine.runAttempt(run, role, steps, signal)`.
-- Consumes `BrowserProvider`, `ReproductionStepExecutor`, `EvidenceCollector`, `DefectObserver`, `RunStore`, and `ResourceLedger`.
+- Produces `runAttempt(run, role, parsedPlan, signal)`.
+- Executes only action statements through `ReproductionStepExecutor` and evaluates expectation statements through `DefectObserver`.
+- Consumes `BrowserProvider`, `EvidenceCollector`, `RunStore`, and resource ownership services established earlier.
 
-- [ ] **Step 1: Write failing deterministic integration tests with a browser-provider test double**
+- [ ] **Step 1: Write failing deterministic integration tests**
 
-Require this order:
+Require this ordering:
 
 ```text
 create recorded browser
-register session ID on attempt
+register owned session identity
 create page
-attach evidence bridge
-capture baseline screenshot
-execute step 1..N
-capture semantic screenshots after required boundaries/failures
-finish evidence collection
+attach evidence bridge before target navigation
+capture baseline semantic evidence
+execute actions in source order
+evaluate expectations at their defined observation boundaries
+capture failure/final semantic evidence
+finish collector
 produce attempt observation/outcome
 close browser in finally
-evaluate replay after close
-persist attempt
+query replay state only after release boundary required by the installed SDK
+persist attempt and cleanup truth
 ```
 
-A thrown step must not skip browser close.
+A thrown action, observer error, or evidence failure must not skip browser cleanup.
 
 - [ ] **Step 2: Prove RED**
 
@@ -249,47 +253,43 @@ A thrown step must not skip browser close.
 npm run test:integration -- AttemptEngine.test.ts
 ```
 
-- [ ] **Step 3: Implement the engine around structured cleanup**
+- [ ] **Step 3: Implement structured attempt ownership**
 
-Use a single attempt-owned `AbortController`/caller signal. Persist enough state before starting external work that a crash leaves an identifiable active attempt.
+Persist enough active state before external work that a crash leaves an identifiable attempt. Each attempt owns one fresh browser and its evidence collector. Caller cancellation flows through an abort signal.
 
-- [ ] **Step 4: Connect evidence bridge to the real page**
+- [ ] **Step 4: Capture evidence at semantic boundaries**
 
-The engine attaches the Plan 3 bridge immediately after page creation and before target navigation so navigation/page errors are observable.
-
-- [ ] **Step 5: Capture screenshots at semantic boundaries**
-
-Initial minimum:
+Minimum useful screenshots:
 
 ```text
-baseline after initial target ready
-immediately before the action associated with the claimed failure when determinable
-after the relevant action/postcondition
-failure state on exception/timeout when a current frame is available
+initial target ready
+before a failure-defining action when determinable
+after relevant action/observation boundary
+current frame on exception/timeout when available
 final attempt state
 ```
 
-Do not take screenshots on arbitrary fixed intervals.
+Do not capture on arbitrary intervals merely to inflate evidence count.
 
-- [ ] **Step 6: Run deterministic integration tests GREEN**
+- [ ] **Step 5: Prove deterministic GREEN**
 
 ```powershell
 npm run test:integration -- AttemptEngine.test.ts
 ```
 
-- [ ] **Step 7: Write and run one real Solari attempt live test**
+- [ ] **Step 6: Add one healthy and one defective real Solari attempt test**
 
-Use the Solari-hosted fixture from Plan 3. Execute one healthy and one defective plan through the production `AttemptEngine` and require real evidence IDs/session ID/replay state/cleanup.
+Use the real sandbox-hosted deterministic fixture from Plan 3 and the actual production AttemptEngine. Require a real session ID, run-owned evidence IDs, correct attempt outcome, replay state, and cleanup record.
 
 ```powershell
 npm run test:live -- AttemptEngine.live.test.ts
 ```
 
-- [ ] **Step 8: Verify no unresolved browser resource remains**
+- [ ] **Step 7: Require resource reconciliation**
 
-A passed attempt test with an unresolved session fails the live test.
+A functional assertion does not pass the live test while its attempt browser remains unresolved.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 8: Commit**
 
 ```powershell
 git add reprodocket/src/core/AttemptEngine.ts reprodocket/tests/integration/AttemptEngine.test.ts reprodocket/tests/live/AttemptEngine.live.test.ts
@@ -299,21 +299,21 @@ git commit -m "feat: run evidence-backed Solari attempts"
 
 ---
 
-## Task 4: Implement the run coordinator and atomic active-run admission
+## Task 4: Implement atomic run admission and the two-attempt coordinator
 
 **Files:**
 - Create: `reprodocket/src/core/RunCoordinator.ts`
 - Create: `reprodocket/src/core/ActiveRunGate.ts`
-- Test: `reprodocket/tests/integration/RunCoordinator.test.ts`
 - Test: `reprodocket/tests/integration/ActiveRunGate.test.ts`
+- Test: `reprodocket/tests/integration/RunCoordinator.test.ts`
 
 **Interfaces:**
 - Implements `RunCoordinator.createAndStart`, `cancel`, `activeRunId`, and `shutdown`.
-- One process allows one executing pipeline while history remains readable.
+- One process supports one executing investigation pipeline while history remains readable.
 
-- [ ] **Step 1: Write failing G004/G005 tests for the gate**
+- [ ] **Step 1: Write failing duplicate-admission race tests**
 
-Race two create requests with `Promise.allSettled`. Require exactly one admitted run and exactly one `RUN_ALREADY_ACTIVE` rejection.
+Race two create requests with `Promise.allSettled`. Exactly one obtains the active slot; the other receives `RUN_ALREADY_ACTIVE`. No second browser-provider call may occur.
 
 - [ ] **Step 2: Prove RED**
 
@@ -321,28 +321,26 @@ Race two create requests with `Promise.allSettled`. Require exactly one admitted
 npm run test:integration -- ActiveRunGate.test.ts
 ```
 
-- [ ] **Step 3: Implement an in-process atomic gate**
+- [ ] **Step 3: Implement the synchronous reservation boundary**
 
-JavaScript runs on one event loop, but admission may still race across awaits. The gate must reserve the active slot before any asynchronous persistence/provider operation and release it only after terminal cleanup/finalization.
+Reserve the active slot before the first asynchronous persistence/provider await. Release it only after terminal persistence and required cleanup/finalization have settled.
 
-- [ ] **Step 4: Write coordinator lifecycle tests**
+- [ ] **Step 4: Write failing coordinator lifecycle tests**
 
-Require:
+Require the authoritative sequence:
 
 ```text
 CREATED persisted
 PREPARING
 INVESTIGATING
-first attempt persisted
+investigation attempt persisted and browser released
 VERIFYING
-second attempt persisted
+fresh verification attempt persisted
 FINALIZING
-report generation/sealing
-COMPLETED
+report/integrity finalization
+COMPLETED or truthful failure/cancellation state
 active gate released
 ```
-
-On failures, require truthful FAILED/INCONCLUSIVE policy and cleanup before gate release.
 
 - [ ] **Step 5: Prove RED**
 
@@ -350,33 +348,33 @@ On failures, require truthful FAILED/INCONCLUSIVE policy and cleanup before gate
 npm run test:integration -- RunCoordinator.test.ts
 ```
 
-- [ ] **Step 6: Implement the coordinator**
+- [ ] **Step 6: Implement first attempt then fresh verification**
 
-The coordinator starts background run execution only after `createAndStart` has persisted the run and returns its authoritative ID. Exceptions are caught at the coordinator boundary, sanitized, persisted, and reflected into the event hub.
+The investigation browser must close before the verification attempt obtains a new browser. Before final classification, require different non-null session IDs. Do not reuse page/context/browser/session state.
 
-- [ ] **Step 7: Connect the two attempts**
+- [ ] **Step 7: Finalize durable evidence before COMPLETED**
 
-After first attempt closes, create verification through a second `AttemptEngine.runAttempt` invocation that causes `BrowserProvider` to create a fresh session. Add an invariant check that the IDs differ before classification.
+Required report generation, artifact sealing, and manifest persistence occur before `COMPLETED` becomes authoritative. Cleanup remains a separate visible dimension and can block Full validation.
 
-- [ ] **Step 8: Finalize report/evidence before COMPLETED**
+- [ ] **Step 8: Prove GREEN and mutate session independence**
 
-`COMPLETED` is persisted only after required durable evidence, report generation, and integrity sealing succeed. Cleanup summary remains separate and can block FULL validation if incomplete.
-
-- [ ] **Step 9: Prove GREEN and mutation check**
-
-Temporarily reuse the first attempt's session ID in the coordinator test and confirm final VERIFIED assertion fails. Restore.
-
-- [ ] **Step 10: Commit**
+Temporarily force the verification record to reuse the investigation session ID. Require the test to fail before `VERIFIED`. Restore and rerun.
 
 ```powershell
-git add reprodocket/src/core/RunCoordinator.ts reprodocket/src/core/ActiveRunGate.ts reprodocket/tests/integration/RunCoordinator.test.ts reprodocket/tests/integration/ActiveRunGate.test.ts
+npm run test:integration -- ActiveRunGate.test.ts RunCoordinator.test.ts
+```
+
+- [ ] **Step 9: Commit**
+
+```powershell
+git add reprodocket/src/core/RunCoordinator.ts reprodocket/src/core/ActiveRunGate.ts reprodocket/tests/integration/ActiveRunGate.test.ts reprodocket/tests/integration/RunCoordinator.test.ts
 git diff --cached --check
-git commit -m "feat: coordinate independent investigation verification"
+git commit -m "feat: coordinate independent ReproDocket verification"
 ```
 
 ---
 
-## Task 5: Add run-create and cancellation HTTP routes
+## Task 5: Expose real run creation and cancellation routes
 
 **Files:**
 - Create: `reprodocket/src/server/routes/runsWrite.ts`
@@ -384,12 +382,25 @@ git commit -m "feat: coordinate independent investigation verification"
 - Test: `reprodocket/tests/integration/RunWriteRoutes.test.ts`
 
 **Interfaces:**
-- Implements `POST /api/runs` and `POST /api/runs/:runId/cancel`.
-- Consumes local request guard and coordinator.
+- Implements `POST /api/runs` and `POST /api/runs/:runId/cancel` from the interface contract.
+- Uses the existing local request guard and `RunCoordinator`.
 
-- [ ] **Step 1: Write failing G001-G005/G010-G011 tests**
+- [ ] **Step 1: Write failing route tests for create, validation, duplicate admission, and cancel**
 
-Require validation to finish before any external adapter invocation. Invalid step grammar returns 400 with `INVALID_REPRODUCTION_STEP`. Active duplicate returns 409. Accepted create returns 202 and a run ID. Cancellation response means requested, not completed.
+Require:
+
+```text
+invalid request shape -> 4xx stable error
+missing/empty plan -> rejected
+action-only plan -> rejected
+expectation-only plan -> rejected
+invalid plan statement -> INVALID_PLAN_STATEMENT
+invalid/blocked target -> rejected before provider invocation
+valid complete plan -> 202 + authoritative run ID
+second active submission -> 409 RUN_ALREADY_ACTIVE
+unknown cancel target -> RUN_NOT_FOUND
+accepted cancel response -> request acknowledged, not falsely terminal
+```
 
 - [ ] **Step 2: Prove RED**
 
@@ -397,15 +408,15 @@ Require validation to finish before any external adapter invocation. Invalid ste
 npm run test:integration -- RunWriteRoutes.test.ts
 ```
 
-- [ ] **Step 3: Implement route schemas**
+- [ ] **Step 3: Implement validated routes**
 
-Use Zod/validated types. Enforce documented length/count limits server-side even if the UI also enforces them.
+Use the server-side `CreateRunRequestValidator`. UI validation is not authority. Enforce documented length/count limits and local mutation guard.
 
 - [ ] **Step 4: Implement cancellation routing**
 
-Cancel only the matching current active run. A terminal run cannot trigger another resource cleanup pass. Unknown run returns `RUN_NOT_FOUND`.
+Cancel only the matching currently owned run. A terminal run cannot trigger a second resource cleanup pass.
 
-- [ ] **Step 5: Prove GREEN including foreign Origin/nonce guard**
+- [ ] **Step 5: Prove GREEN with security adjacency**
 
 ```powershell
 npm run test:integration -- RunWriteRoutes.test.ts LocalServerSecurity.test.ts
@@ -416,7 +427,7 @@ npm run test:integration -- RunWriteRoutes.test.ts LocalServerSecurity.test.ts
 ```powershell
 git add reprodocket/src/server/routes/runsWrite.ts reprodocket/src/server/createServer.ts reprodocket/tests/integration/RunWriteRoutes.test.ts
 git diff --cached --check
-git commit -m "feat: expose investigation lifecycle routes"
+git commit -m "feat: expose ReproDocket run lifecycle routes"
 ```
 
 ---
@@ -425,18 +436,19 @@ git commit -m "feat: expose investigation lifecycle routes"
 
 **Files:**
 - Create: `reprodocket/src/client/components/NewInvestigationForm.tsx`
-- Create: `reprodocket/src/client/components/ReproductionStepHelp.tsx`
+- Create: `reprodocket/src/client/components/PlanSyntaxHelp.tsx`
 - Modify: `reprodocket/src/client/App.tsx`
 - Modify: `reprodocket/src/client/api/ApiClient.ts`
 - Test: `reprodocket/tests/ui/NewInvestigation.spec.ts`
 
 **Interfaces:**
-- Uses `POST /api/runs` only; it does not call an internal engine directly.
+- Uses only the public local `POST /api/runs` path.
+- Submits target URL, problem description, and one required action-and-expectation plan.
 - Navigates to `/runs/:runId` after the server accepts the run.
 
-- [ ] **Step 1: Write failing H004-H008 tests**
+- [ ] **Step 1: Write failing H004 through H008 user-boundary tests**
 
-Require target/problem/steps validation, optional whitespace normalization, visible step syntax help, one submission despite rapid double click, and server error projection without stack traces.
+Require target, problem, and plan completeness. Omitted plan, action-only plan, and expectation-only plan are rejected. Show working syntax help for both actions and expectations. Rapid double submit creates one server run. Server errors render sanitized text without stack traces.
 
 - [ ] **Step 2: Prove RED**
 
@@ -445,17 +457,17 @@ npm run build
 npm run test:ui -- NewInvestigation.spec.ts
 ```
 
-- [ ] **Step 3: Implement the form**
+- [ ] **Step 3: Implement the form from the UI specification**
 
-Use one textarea with one reproduction statement per line. Show concise examples from the actual parser grammar. Validate client-side for immediacy but treat the server response as authority.
+Use labeled target/problem/plan controls. The plan textarea is one statement per line and visibly warns that plan text is persisted and must not contain secrets. Syntax help comes from the actual finalized grammar.
 
-- [ ] **Step 4: Disable only after submission begins and re-enable on rejected admission**
+- [ ] **Step 4: Keep server admission authoritative**
 
-A client button disable is not the concurrency authority. Server gate remains required.
+Disable the submit control after submission begins for usability, but rely on the server active-run gate for concurrency. Re-enable after rejected admission.
 
 - [ ] **Step 5: Navigate to the authoritative run**
 
-On 202, route directly to `/runs/<id>` and let the existing run page hydrate from GET/SSE.
+On `202`, route to `/runs/<id>` and hydrate the page through GET/SSE. Do not construct optimistic fake run state in the client.
 
 - [ ] **Step 6: Prove GREEN and accessibility**
 
@@ -464,12 +476,12 @@ npm run build
 npm run test:ui -- NewInvestigation.spec.ts
 ```
 
-Check labels, error associations, keyboard submission, focus after error, and visible step help.
+Verify accessible names, error associations, keyboard operation, focus after rejection, visible plan help, and nonsecret-plan warning.
 
 - [ ] **Step 7: Commit**
 
 ```powershell
-git add reprodocket/src/client/components/NewInvestigationForm.tsx reprodocket/src/client/components/ReproductionStepHelp.tsx reprodocket/src/client/App.tsx reprodocket/src/client/api/ApiClient.ts reprodocket/tests/ui/NewInvestigation.spec.ts
+git add reprodocket/src/client/components/NewInvestigationForm.tsx reprodocket/src/client/components/PlanSyntaxHelp.tsx reprodocket/src/client/App.tsx reprodocket/src/client/api/ApiClient.ts reprodocket/tests/ui/NewInvestigation.spec.ts
 git diff --cached --check
 git commit -m "feat: connect the ReproDocket investigation form"
 ```
@@ -487,11 +499,11 @@ git commit -m "feat: connect the ReproDocket investigation form"
 - Test: `reprodocket/tests/live/RunCancellation.live.test.ts`
 
 **Interfaces:**
-- UI -> cancel API -> coordinator -> AbortController -> attempt cleanup -> terminal persistence -> UI.
+- UI -> cancel API -> coordinator -> abort signal -> attempt cleanup -> terminal persistence -> UI.
 
-- [ ] **Step 1: Write deterministic M018-M020/O006 tests**
+- [ ] **Step 1: Write deterministic cancel tests before implementation**
 
-Use controllable fake browser actions that wait on an AbortSignal. Cancel during investigation and during verification. Require no new step begins after cancellation requested, resources close once, final lifecycle CANCELLED, and final outcome is never promoted to VERIFIED.
+Cancel during investigation and verification. Require no new action after cancellation request, no false `VERIFIED`, exactly-once cleanup requests per owned resource, and terminal `CANCELLED` only after the server persists it.
 
 - [ ] **Step 2: Prove RED**
 
@@ -499,24 +511,24 @@ Use controllable fake browser actions that wait on an AbortSignal. Cancel during
 npm run test:integration -- RunCancellation.test.ts
 ```
 
-- [ ] **Step 3: Implement coordinator cancellation token ownership**
+- [ ] **Step 3: Implement coordinator cancellation ownership**
 
-Only the active run's controller may be aborted. Cancellation request is idempotent.
+Only the active run's controller may be aborted. Repeated cancellation is idempotent. Unknown/unowned run IDs cannot cancel another run.
 
-- [ ] **Step 4: Implement cancel UI**
+- [ ] **Step 4: Implement truthful Cancel UI**
 
-Show Cancel only when lifecycle is cancellable. After click, show `Cancellation requested` until server reports terminal state. Do not display CANCELLED immediately from client optimism.
+Show Cancel only while the lifecycle is cancellable. After click, show `Cancellation requested` until terminal server state arrives. Do not optimistically display `CANCELLED`.
 
-- [ ] **Step 5: Run UI test**
+- [ ] **Step 5: Prove UI GREEN**
 
 ```powershell
 npm run build
 npm run test:ui -- RunCancellation.spec.ts
 ```
 
-- [ ] **Step 6: Add one bounded live cancellation test**
+- [ ] **Step 6: Add one bounded real Solari cancellation test**
 
-Use a deterministic fixture action with a long wait. Start a real Solari run, cancel, and require browser cleanup plus terminal CANCELLED. Do not create a deliberately harmful external mutation just to test cancellation.
+Use a deterministic fixture wait/action, cancel the real run, and require browser cleanup plus terminal `CANCELLED`. Do not create a harmful external mutation solely to test cancellation.
 
 ```powershell
 npm run test:live -- RunCancellation.live.test.ts
@@ -527,12 +539,12 @@ npm run test:live -- RunCancellation.live.test.ts
 ```powershell
 git add reprodocket/src/core/RunCoordinator.ts reprodocket/src/client/components/CancelRunButton.tsx reprodocket/src/client/pages/RunPage.tsx reprodocket/tests/integration/RunCancellation.test.ts reprodocket/tests/ui/RunCancellation.spec.ts reprodocket/tests/live/RunCancellation.live.test.ts
 git diff --cached --check
-git commit -m "feat: cancel active investigations safely"
+git commit -m "feat: cancel ReproDocket runs safely"
 ```
 
 ---
 
-## Task 8: Add complete fixture plans and prove all four outcome classes
+## Task 8: Define the complete deterministic fixture plans and all four outcome classes
 
 **Files:**
 - Create: `reprodocket/fixtures/plans/account-blank.json`
@@ -545,11 +557,12 @@ git commit -m "feat: cancel active investigations safely"
 - Test: `reprodocket/tests/integration/FixturePlans.test.ts`
 
 **Interfaces:**
-- Fixture plan JSON contains only public CreateRunRequest/expectation fields and no privileged product hooks.
+- Each fixture plan is an ordinary `CreateRunRequest` using only the public finalized grammar and nonsecret test data.
+- Fixture route/scenario identity is not passed as a privileged product instruction.
 
-- [ ] **Step 1: Define each plan through the public step grammar**
+- [ ] **Step 1: Encode plans against the independent fixture specification**
 
-Examples after observation grammar is finalized:
+Representative finalized grammar:
 
 ```text
 account blank:
@@ -570,68 +583,68 @@ CLICK "Submit address"
 EXPECT_TEXT "Address accepted"
 ```
 
-Healthy plans must assert the intended postcondition so NOT_REPRODUCED is evidence-backed rather than a default absence state.
+Healthy negative-control plans define an alleged defect condition that the healthy fixture does not satisfy after the workflow is fully exercised. Do not use an automatically healthy default merely because an error was absent.
 
-- [ ] **Step 2: Write plan parse/oracle tests**
+- [ ] **Step 2: Write failing plan/oracle consistency tests**
 
-Every plan must parse using production grammar and reference a fixture route that the independent fixture truth tests prove.
+Every plan must parse through `parsePlanStatements`, satisfy request completeness, contain no unknown fields, and refer only to fixture behaviors independently established by `docs/reprodocket-fixture-spec.md` and fixture truth tests.
 
-- [ ] **Step 3: Prove RED for any missing observation grammar**
-
-Run:
+- [ ] **Step 3: Prove RED while plan files/fixtures are absent**
 
 ```powershell
 npm run test:integration -- FixturePlans.test.ts
 ```
 
-Update parser/contracts only through the design process recorded in Task 2.
+- [ ] **Step 4: Implement all seven plan files and prove GREEN**
 
-- [ ] **Step 4: Prove all plan files valid**
+```powershell
+npm run test:integration -- FixturePlans.test.ts
+```
 
-Require exactly the expected plan count and no unknown fields.
+Require the expected plan count and the intended mapping to the four result classes without production code branching on plan names.
 
 - [ ] **Step 5: Commit**
 
 ```powershell
 git add reprodocket/fixtures/plans reprodocket/tests/integration/FixturePlans.test.ts
 git diff --cached --check
-git commit -m "test: define end-to-end reproduction plans"
+git commit -m "test: define ReproDocket end-to-end plans"
 ```
 
 ---
 
-## Task 9: Execute the complete product path through real Solari
+## Task 9: Prove the complete real product path through the local UI and Solari
 
 **Files:**
 - Create: `reprodocket/tests/e2e/ReproDocketFullFlow.spec.ts`
 - Create: `reprodocket/tests/e2e/E2eHarness.ts`
-- Modify: `reprodocket/playwright.config.ts` if a separate e2e project is needed.
+- Modify: `reprodocket/playwright.config.ts` only if a dedicated E2E project is required.
 
 **Interfaces:**
-- Executes L001-L014 through the real built local UI and real Solari-hosted fixture.
-- The harness may prepare the fixture URL, but run creation must occur through the same user-facing form/API path a normal user uses.
+- Exercises the real built local UI, local APIs, production coordinator/attempt engine, real Solari browsers, and the real Solari sandbox-hosted fixture.
+- The harness may create the fixture URL, but run creation itself occurs through the normal visible form/API path.
 
-- [ ] **Step 1: Write the E2E harness ownership boundary**
+- [ ] **Step 1: Implement outer resource ownership in the E2E harness**
 
-The harness:
+The harness sequence is:
 
 ```text
-starts exact built ReproDocket server
-creates one owned Solari sandbox fixture
-externally verifies fixture version
-opens local ReproDocket UI
-submits plan through visible form
-waits for terminal run state
-reads UI result
-reads persisted manifest via public/local API
-asserts horizontal equality
-kills fixture sandbox
-stops owned local server
+build/start exact ReproDocket source
+create one owned Solari sandbox fixture
+externally verify fixture version/health
+open local ReproDocket UI
+configure/use authorized Solari credential without exposing it
+submit a normal complete plan through the visible form
+wait for terminal authoritative state
+read UI result and public/local API projection
+assert manifest/report/history/evidence parity
+kill fixture sandbox in outer finally
+stop owned local server
 ```
 
-Cleanup lives in outer `finally` blocks so a UI assertion failure does not strand Solari resources.
+A UI assertion failure must not strand the fixture sandbox.
 
-- [ ] **Step 2: Add L001-L006 happy/negative outcome tests**
+- [ ] **Step 2: Add all deterministic result scenarios**
 
 Require:
 
@@ -642,52 +655,51 @@ missing ZIP -> VERIFIED
 healthy profile -> NOT_REPRODUCED
 healthy login -> NOT_REPRODUCED
 ambiguous -> INCONCLUSIVE
+nonrepeatable -> REPRODUCED
 ```
 
-- [ ] **Step 3: Add L007 nonrepeatable case**
+The fixture truth tests remain a separate oracle authority.
 
-Fixture state must make the first fresh browser reproduce and the second fresh browser not reproduce without ReproDocket knowing the fixture scenario identity. Expected final result REPRODUCED.
+- [ ] **Step 3: Assert fresh-session independence**
 
-- [ ] **Step 4: Assert fresh-session proof L008-L010**
-
-For every verified/nonrepeatable run:
+For every two-attempt run:
 
 ```text
-investigation sessionId non-null
-verification sessionId non-null
+investigation session ID non-null
+verification session ID non-null
 IDs differ
-first browser close recorded before verification session creation
-first evidence attemptId differs from second
-evidence ownership remains correct
+investigation release occurs before verification creation
+evidence attempt ownership differs correctly
+no browser/page/context reuse
 ```
 
-- [ ] **Step 5: Assert local result parity L011-L013**
+- [ ] **Step 4: Assert local result parity and restart persistence**
 
-Run detail visible outcome, report JSON, history row, and persisted manifest all match. Restart the local ReproDocket server after at least one completed run and prove the history/detail remain available without creating a new Solari browser.
+Run detail, history, JSON report, HTML report, evidence lists, and manifest agree on the same run. Restart ReproDocket after a completed run and prove it remains visible without creating a new Solari browser.
 
-- [ ] **Step 6: Assert cleanup L014**
+- [ ] **Step 5: Assert resource cleanup**
 
-At suite end, no harness-owned browser or sandbox is unresolved. If provider confirmation is limited, record the strongest authoritative terminal state supported by the current SDK and do not overclaim.
+At suite end, every harness-owned browser and sandbox must be reconciled to the strongest terminal state the current provider exposes. Unresolved cleanup prevents E2E PASS.
 
-- [ ] **Step 7: Run one scenario first**
+- [ ] **Step 6: Run one vertical scenario first**
 
 ```powershell
 npx playwright test tests/e2e/ReproDocketFullFlow.spec.ts --grep "account blank"
 ```
 
-Repair until one complete vertical path passes.
+Repair until one complete real vertical path passes.
 
-- [ ] **Step 8: Run all E2E scenarios**
+- [ ] **Step 7: Run all E2E outcome scenarios**
 
 ```powershell
 npx playwright test tests/e2e/ReproDocketFullFlow.spec.ts
 ```
 
-- [ ] **Step 9: Mutation proof the harness**
+- [ ] **Step 8: Mutation prove false-positive sensitivity**
 
-Temporarily force the classifier to return VERIFIED for the healthy-profile case. Confirm the E2E suite fails. Restore and rerun healthy profile to PASS.
+Temporarily force the classifier toward `VERIFIED` for a healthy control. Confirm the healthy E2E case fails. Restore and rerun the affected scenario.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 9: Commit**
 
 ```powershell
 git add reprodocket/tests/e2e reprodocket/playwright.config.ts
@@ -697,7 +709,7 @@ git commit -m "test: prove ReproDocket end to end on Solari"
 
 ---
 
-## Task 10: Close horizontal and vertical connectivity for M5-M7
+## Task 10: Close horizontal and vertical connectivity for M5 through M7
 
 **Files:**
 - Modify: `reprodocket/docs/connectivity-matrix.md`
@@ -707,92 +719,63 @@ git commit -m "test: prove ReproDocket end to end on Solari"
 - Modify: `reprodocket/scripts/validate.ps1`
 
 **Interfaces:**
-- Adds N001-N015 and O001-O009 applicable complete paths to Full validation.
+- Adds the applicable N-series and O-series authorities from `docs/reprodocket-test-matrix.md` to Full validation.
 
-- [ ] **Step 1: Update every visible feature row from current evidence**
+- [ ] **Step 1: Reinventory every visible feature from the actual built application**
 
-Do not mark COMPLETE based on implementation existence. Each row needs discoverability, entry, prerequisites, action routing, feedback, authority, persistence, reload, recovery, exit/return, regression coverage, and human-QA state.
+A row becomes complete only when discoverability, entry, prerequisites, action routing, feedback, authority, persistence, reload, recovery where applicable, exit/return, regression coverage, and remaining human-QA state are known.
 
-- [ ] **Step 2: Write full vertical tests O002-O009**
+- [ ] **Step 2: Write vertical user-outcome tests**
 
 At minimum prove:
 
 ```text
-new investigation UI -> Solari -> evidence -> verification -> outcome -> UI
+New Investigation -> validated request -> Solari -> evidence -> verification -> outcome -> UI
 screenshot click -> artifact ownership -> integrity -> image response
-replay state -> exact local evidence/replay authority
-cancel UI -> cleanup -> terminal state
+replay control -> authoritative replay state
+cancel -> coordinator -> resource cleanup -> terminal state -> UI
 restart -> validated history -> detail
-malformed historical artifact -> explicit damaged state without global failure
-fixture validation -> sandbox -> browser A -> browser B -> local UI -> cleanup
+one damaged historical run -> explicit diagnostic without global history failure
+Full fixture validation -> sandbox -> browser A -> browser B -> local results -> cleanup
 ```
 
-- [ ] **Step 3: Run horizontal consistency on real E2E data**
+- [ ] **Step 3: Run horizontal consistency against real E2E data**
 
-Do not restrict consistency tests to synthetic local manifests once real run data exists.
+Once real runs exist, do not limit consistency checks to synthetic manifests. Compare active/history/detail/report/evidence/replay/cleanup/provider/validation projections against the same durable authority.
 
-- [ ] **Step 4: Add the complete product stages to Full validation**
+- [ ] **Step 4: Add complete product stages to Full validation**
 
-Ordering after substrate contracts:
+After substrate contracts, Full includes:
 
 ```text
 fixture truth
 attempt engine
-coordinator
-user-boundary UI
-full outcome E2E
+run coordinator
+built user-boundary UI
+all outcome E2E
 horizontal consistency
 vertical connectivity
 resource reconciliation
 report/evidence integrity
 ```
 
-- [ ] **Step 5: Run Full for the first time with a complete vertical slice**
+- [ ] **Step 5: Run the first complete machine Full validation**
 
 ```powershell
 .\reprodocket\scripts\validate.ps1
 ```
 
-Expected: only PASS if every mandatory implemented authority is current. Human subjective QA remains separately pending/ready rather than silently included in machine PASS.
+It may return PASS only if every applicable mandatory machine authority is current for the exact source revision. Human visual/usability judgment remains a separate state.
 
-- [ ] **Step 6: Capture product evidence at defect-resolving scale**
+- [ ] **Step 6: Capture objective visual evidence from the same build**
 
-Using the built local app and current run data, capture original-resolution views of:
+Capture original-resolution views required by `docs/reprodocket-ui-spec.md` and `docs/reprodocket-test-matrix.md`, including New Investigation, active state, all four outcomes, history, screenshot/console/network/timeline evidence, replay state, and representative failure/cancellation.
 
-```text
-New Investigation
-Active Investigation
-VERIFIED
-REPRODUCED
-NOT_REPRODUCED
-INCONCLUSIVE
-History
-Screenshot evidence
-Console evidence
-Network evidence
-Timeline
-Replay state
-representative failure/cancellation
-```
+Use background-safe Playwright capture for this local web UI. Do not require desktop-wide foreground automation for ordinary web layout proof.
 
-Use background-safe browser capture. No desktop-wide input/capture is required for a local web UI claim.
+- [ ] **Step 7: Repair objective UI defects before hardening**
 
-- [ ] **Step 7: Inspect and repair objective UI defects before moving to hardening**
-
-Blocking examples:
-
-```text
-truncated labels
-horizontal overflow
-raw stack trace
-unreadable small text
-result/status contradiction
-dead replay/cancel control
-history/detail mismatch
-wrong run screenshot
-```
-
-Each repair receives a regression test.
+Blocking examples include clipped labels, horizontal overflow, unreadable small text, raw stack traces, result/status contradiction, dead controls, history/detail mismatch, wrong-run evidence, and misleading success styling. Each repair receives a regression test.
 
 - [ ] **Step 8: Commit connectivity closure**
 
@@ -804,29 +787,30 @@ git commit -m "test: close ReproDocket vertical integration"
 
 ---
 
-## Plan 4 completion gate
+## Plan 4 Completion Gate
 
-Do not begin final hardening while any ordinary supported path is partial or disconnected.
+Do not begin the hardening plan while any ordinary supported product path is partial or disconnected.
 
-Current evidence must prove:
+Current evidence for one source revision must establish:
 
 ```text
-all supported reproduction grammar executes through real browser semantics
-observation rules cannot treat unrelated console/network noise as automatic bug proof
-one AttemptEngine path works against real Solari
-first and second attempts are fresh independent Solari sessions
+all supported action grammar executes through real browser semantics
+all finalized expectation grammar is evaluated through general evidence rules
+unrelated console/network noise cannot automatically prove a defect
+one production AttemptEngine path works against real Solari
+investigation and verification are fresh independent Solari sessions
 all four final outcome classes are demonstrated
-one-active-run admission survives duplicate request races
-cancellation is end-to-end and resource-aware
-New Investigation UI submits the real production path
+one-active-run admission survives duplicate-request races
+cancellation works end to end and is resource aware
+New Investigation UI submits the real public/local path
 all deterministic fixture plans are independently truthful
 real Solari E2E covers positive, negative, ambiguous, and nonrepeatable cases
 completed runs survive local app restart
-reports/history/detail/evidence agree with the manifest
-all owned Solari resources are reconciled
-horizontal and vertical connectivity matrices contain no UNKNOWN/PARTIAL ordinary supported feature
+reports/history/detail/evidence agree with manifest authority
+all required owned Solari resources are reconciled
+horizontal and vertical connectivity contain no unresolved ordinary-scope partial/dead path
 Full machine validation has a current result for the exact source revision
-human visual/usability state is explicitly separate
+human visual/usability authority remains explicitly separate
 ```
 
 Run:
@@ -837,4 +821,4 @@ git status --short
 git diff main...HEAD --check
 ```
 
-A machine Full PASS at this point means implementation/integration is ready for the deliberate bug-finding and hardening plan. It does not yet mean publication ready.
+A machine Full PASS at this point means the implemented front-to-back product is ready for the deliberate bug-finding and hardening plan. It does not mean publication ready.
