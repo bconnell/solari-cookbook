@@ -3,52 +3,45 @@
 Date: August 31, 2026
 Status: Pre-implementation security baseline
 
-This document defines the minimum security, privacy, ownership, and recovery behavior required for ReproDocket version one. It is intentionally scoped to the actual product: a loopback-only local web application that accepts a target URL and drives remote Solari resources.
+This document defines the minimum security, privacy, ownership, and recovery behavior required for ReproDocket version one. It is scoped to the actual product: a loopback-only local application that accepts a public web target and an auditable nonsecret test plan, then drives remote Solari resources.
 
-Security work must remain proportional. The product does not need enterprise identity, multi-tenant authorization, or speculative infrastructure. It does need strong boundaries around credentials, arbitrary target input, locally served mutation APIs, persisted evidence, remote resource lifecycle, and untrusted text rendered back into the UI or report.
+Security remains proportional. ReproDocket does not need enterprise identity, multitenant authorization, or speculative infrastructure. It does need strong boundaries around provider credentials, arbitrary target input, localhost mutation APIs, persisted evidence, remote resource lifetime, and untrusted text rendered back into the UI or static report.
+
+The exact user-data privacy boundary is defined in [`reprodocket-data-handling.md`](reprodocket-data-handling.md).
 
 ## 1. Trust boundaries
 
-ReproDocket crosses five meaningful trust boundaries:
+ReproDocket crosses these meaningful boundaries:
 
-1. The local user's browser to the ReproDocket loopback service.
-2. User supplied target URL and defect text into the application.
-3. ReproDocket to the Solari APIs and browser or sandbox resources.
-4. Remote target content, console messages, network metadata, and screenshots back into local evidence.
-5. Persisted local evidence back into the browser UI and generated HTML report.
+1. Local browser to ReproDocket's loopback service.
+2. User-authored target, problem, and plan into the application.
+3. ReproDocket to Solari APIs and browser/sandbox resources.
+4. Remote target content and browser events back into local evidence.
+5. Persisted local evidence back into the UI and HTML report.
+6. Application shutdown/restart back into persisted lifecycle/resource state.
 
-Every externally supplied string should be treated as data rather than executable content.
+Every externally supplied string is data, not executable product content.
 
 ## 2. Local service exposure
 
-The local server binds to loopback only by default.
-
-Allowed bind targets:
+Normal bind targets:
 
 ```text
 127.0.0.1
 ::1
 ```
 
-The application must not default to `0.0.0.0`, a LAN interface, or a public interface.
+The application does not default to `0.0.0.0`, a LAN interface, or a public interface.
 
-The server must reject unexpected Host values rather than relying only on the bind address. Accepted Host values are the actual selected loopback host and port used for the running instance.
+The server rejects unexpected Host values rather than relying only on the bind address. CORS is disabled by default; no wildcard origin is allowed.
 
-CORS is disabled by default. No wildcard origin is allowed.
+State-changing routes require a same-origin request and a per-process random request nonce supplied through the same-origin bootstrap path. The nonce is defense in depth against drive-by localhost mutation; it is not represented as user authentication.
 
-Mutation routes require same-origin requests. Requests with an `Origin` header that does not match the current local application origin are rejected.
+The nonce is ephemeral and does not enter run evidence, public logs, or source.
 
-A per-process random local session nonce is generated at startup. The normal UI receives it through a same-origin bootstrap path and includes it on state-changing API requests. The nonce is not persisted across application restarts and is not written to public logs or evidence.
+## 3. Response security
 
-The nonce is defense in depth against drive-by requests to a localhost service. It is not presented as user authentication.
-
-## 3. HTTP response security
-
-The local service should emit security headers appropriate to a loopback web application, including a restrictive Content Security Policy.
-
-The initial policy should be compatible with the built Vite application without allowing arbitrary remote scripts. The application must not require `unsafe-eval` in the production style build.
-
-Recommended baseline goals:
+The built local service uses a restrictive policy compatible with the actual bundled UI. Initial target:
 
 ```text
 Content-Security-Policy: default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'
@@ -57,531 +50,530 @@ Referrer-Policy: no-referrer
 Cross-Origin-Resource-Policy: same-origin
 ```
 
-If local replay rendering later requires a frame or additional source, the policy must be widened only for that proven use case.
+Do not add `unsafe-eval` to make development tooling easier in the production-style build.
+
+If a proven replay/viewer feature requires a wider policy, widen only the exact needed source/directive and add regression coverage.
 
 ## 4. Target URL policy
 
-Version one accepts only `http:` and `https:` target URLs.
+Version one accepts only public `http:` and `https:` targets.
 
-The following are rejected before a Solari session is created:
+Reject before Solari resource creation:
 
-* `file:`
-* `data:`
-* `javascript:`
-* `blob:` as a top-level target
-* custom executable schemes
-* URLs containing credentials in the authority component
-* empty or malformed host names
-* `localhost`
-* `.localhost` names
-* `.local` names
-* loopback IP address literals
-* link-local IP address literals
-* private RFC1918 IPv4 address literals
-* IPv6 loopback, unique-local, and link-local address literals
-* known cloud metadata link-local destinations such as `169.254.169.254`
+```text
+file:
+data:
+javascript:
+top-level blob:
+unknown/custom executable schemes
+URLs containing username/password authority credentials
+malformed/empty hosts
+localhost and .localhost
+.local
+IPv4 loopback including 127/8
+RFC1918 private IPv4
+IPv4 link-local
+169.254.169.254 and equivalent known metadata/link-local targets
+IPv6 loopback
+IPv6 unique-local
+IPv6 link-local
+```
 
-The reason is simple: a target is executed from a cloud browser. ReproDocket must not become a convenient interface for probing internal or metadata services from the provider environment.
+The initial parser/policy must use proper URL/IP parsing rather than substring tests.
 
-If the host is a domain name, target policy must be rechecked after DNS resolution where the SDK and execution environment make that feasible. A redirect chain that lands on a prohibited local, private, or metadata destination must be rejected or aborted rather than treated as a valid target.
+A public domain that resolves to or redirects to a prohibited destination is blocked to the strongest authoritative boundary exposed by the installed browser/provider. If authoritative DNS visibility is unavailable, document that limitation rather than claiming complete SSRF prevention.
 
-The deterministic test fixture uses a public Solari preview URL and therefore does not require an exception to this rule.
+The Solari fixture preview is public and does not require a private-network exception.
 
-Version one does not provide a user override for blocked private network targets.
+Version one has no user override for blocked private destinations.
 
-## 5. Target navigation policy
+## 5. Navigation policy
 
-A run records the initial requested origin and the final navigated URL. Redirects are allowed between ordinary public HTTP and HTTPS destinations.
+The initial requested URL and relevant final main-frame URLs are recorded in sanitized form.
 
-Navigation to a prohibited scheme or prohibited network destination during an automated action aborts that action and yields a truthful blocked or inconclusive result.
+Each explicit absolute `OPEN`, `WAIT_FOR_URL`, and `EXPECT_URL` target is subject to the same scheme/network policy as the initial target.
 
-The system must not silently follow a download into a local executable action.
+Main-frame redirects are revalidated where the browser boundary provides the necessary authority. Prohibited redirect destinations abort the relevant action/run rather than being silently accepted.
 
-## 6. User supplied text
+The product never converts a download or nonweb scheme into local execution.
 
-Problem descriptions, optional reproduction steps, target page titles, console messages, URLs, network error strings, and all target-derived evidence are untrusted text.
+## 6. User-authored run text
 
-React views render them as text rather than raw HTML.
+Target URL, problem description, and source plan are untrusted text.
 
-No component may use `dangerouslySetInnerHTML` with target-derived or run-derived content.
+The source plan is **required** and intentionally persisted. Version one supports only nonsecret test values in that plan. The UI warns users that the plan is stored and must not contain real passwords, API keys, session tokens, payment data, or other confidential values.
 
-The generated standalone HTML report must use an escaping function for every untrusted value. Tests must include script tags, event-handler attributes, HTML entities, Unicode control characters, and strings resembling closing tags.
+The product does not claim it can perfectly detect arbitrary secrets inside freeform user-authored text.
 
-A report containing target text such as:
+React renders run/target text as text nodes/properties rather than raw HTML. Do not use `dangerouslySetInnerHTML` for target-derived or run-derived data.
+
+The static report escapes every untrusted value. Payloads such as:
 
 ```text
 </script><script>alert(1)</script>
 ```
 
-must display that value as text and must not execute it.
+must render as inert text.
 
-## 7. Evidence collection minimization
+Tests include markup, event-handler strings, malformed entities, bidi/control characters, and source-like/debug-like text.
 
-ReproDocket captures enough evidence to explain the run without intentionally collecting secrets.
+## 7. Evidence minimization
 
-Default durable evidence may include:
+Durable target-derived evidence may include:
 
-* screenshots at defined semantic boundaries,
-* console warnings and errors,
-* uncaught page errors,
-* request method,
-* sanitized request URL,
-* response status,
-* request failure reason,
-* timing,
-* page URL and title,
-* action description,
-* session identity,
-* replay availability,
-* product-generated observations.
+```text
+semantically timed screenshots
+selected console warnings/errors
+uncaught page errors
+request method
+sanitized request URL
+main-document/relevant response status
+request failure reason
+timing where available
+page URL/title
+action and expectation timeline
+session identity
+replay state
+observation results
+cleanup state
+```
 
-Default durable evidence must exclude:
+Do not persist by default:
 
-* Authorization headers,
-* Cookie and Set-Cookie headers,
-* proxy credentials,
-* Solari API keys,
-* password field values,
-* credit card values,
-* unrestricted request bodies,
-* unrestricted response bodies,
-* browser cookies,
-* localStorage and sessionStorage dumps,
-* saved profile contents,
-* arbitrary DOM serialization.
+```text
+Authorization headers
+Cookie/Set-Cookie headers
+proxy credentials
+Solari API key
+unrestricted request/response bodies
+browser cookie jars
+localStorage/sessionStorage dumps
+saved profile contents
+arbitrary DOM serialization
+```
 
-Screenshots can still contain sensitive information shown by the target site. The UI and documentation must make that limitation clear. ReproDocket does not claim screenshots are automatically privacy-safe.
+Action values are not redundantly copied into evidence events unless necessary. The canonical source plan already records intentional user-authored input and is governed by the nonsecret-plan requirement.
+
+Screenshots and replay material can contain target-visible data. ReproDocket does not claim automatic screenshot/replay redaction.
 
 ## 8. Redaction
 
-All text evidence passes through a central redaction boundary before durable persistence.
+Provider/target-derived structured text passes through a central redactor before durable persistence.
 
-The redactor must recognize at least:
-
-* exact current Solari API key value,
-* values from known secret-bearing headers,
-* obvious bearer token patterns,
-* password field values known to the automation layer,
-* query parameters explicitly classified as sensitive by the action layer.
-
-Redaction must occur before logs are serialized, not only before the UI displays them.
-
-The original secret must never be included in a redaction failure message.
-
-Tests must deliberately inject a known fake key and verify it is absent from every generated JSON, HTML, log, and validation summary artifact.
-
-## 9. Solari API key storage
-
-The normal Windows path uses the current Windows user boundary.
-
-The preferred zero-extra-dependency implementation is a small PowerShell 7 helper using `.NET` protected data APIs with `CurrentUser` scope. Node communicates the plaintext secret through the child process standard input rather than as a command-line argument.
-
-The helper returns only encrypted bytes for storage and plaintext only through standard output to the owning Node process during a deliberate decrypt operation.
-
-The stored encrypted value resides under the user's local application data directory.
-
-No secret is stored in:
-
-* `.env`,
-* package scripts,
-* repository config,
-* command-line arguments,
-* process ownership metadata,
-* run manifests,
-* validation artifacts.
-
-`SOLARI_API_KEY` remains an optional developer and automation source. When both environment and stored credential exist, the documented precedence must be deterministic and visible in diagnostics without showing the secret value.
-
-Recommended precedence:
+The redactor handles authoritatively known sensitive values and common high-confidence patterns, including:
 
 ```text
-explicit process environment -> protected local store -> unavailable
+current Solari API key value
+known secret-bearing headers
+obvious bearer-token forms
+signed provider capability values when classified as sensitive
+explicitly classified sensitive URL parameters
 ```
 
-The UI may identify the source as `Environment`, `Protected local store`, or `Not configured`.
+Redaction is defense in depth. It is not a substitute for the nonsecret source-plan rule and does not promise perfect arbitrary-secret discovery.
+
+The original secret is never included in a redaction error.
+
+A synthetic known key is injected through provider-derived channels in tests and searched across generated JSON, HTML, logs, and validation summaries.
+
+## 9. Solari credential storage
+
+The normal Windows experience uses the current Windows user protection boundary.
+
+Preferred initial implementation: a small PowerShell 7 helper calling supported .NET protected-data APIs with `CurrentUser` scope. Node sends plaintext to the helper over standard input rather than a command-line argument.
+
+Encrypted bytes are stored beneath the ReproDocket local application-data root. Plaintext exists only in process memory for the minimum deliberate operation.
+
+The Solari key is never intentionally stored in:
+
+```text
+.env
+package scripts
+repository configuration
+source plan
+command-line arguments
+process ownership metadata
+run manifest
+report/evidence
+validation artifacts
+public source
+```
+
+`SOLARI_API_KEY` remains an optional automation/developer source.
+
+Credential source precedence:
+
+```text
+explicit process environment
+-> protected local store
+-> unavailable
+```
+
+The UI may identify `Environment`, `Protected local store`, or `Not configured` without revealing key material.
 
 ## 10. Credential verification
 
-Saving a credential does not immediately mark the provider READY.
+Saving a credential does not immediately mean provider READY.
 
-The application performs a real harmless Solari control-plane or short-lived browser readiness operation appropriate to the current SDK.
+ReproDocket performs a harmless current Solari readiness operation appropriate to the installed SDK. If browser creation is the only authoritative verification path, the resulting short-lived browser is registered and closed immediately.
 
-A failed verification leaves the status unready and provides a sanitized reason.
+Failed verification leaves provider state unready and displays a sanitized actionable reason.
 
-If the verification requires creating a browser session, that session must be closed immediately and ownership must be proven in tests.
+An environment-sourced credential is not overwritten through the local-store endpoint. Deleting a protected local credential does not mutate the process environment.
 
-## 11. Local filesystem boundaries
+## 11. Filesystem boundary
 
-All application-owned persistent paths are derived from one known application root under local application data.
+All application-owned persistent paths derive from one known application-data root.
 
-Run IDs are generated internally. User input cannot select a filesystem path.
+Run IDs are generated internally. User input never selects a filesystem path.
 
-Artifact serving routes accept a run identity and an artifact identity from a validated manifest. They do not concatenate arbitrary user supplied path strings.
+Artifact routes accept validated run identity plus artifact identity from the run manifest. Do not concatenate user-supplied paths.
 
-Any path resolution that escapes the configured run root is rejected.
+Reject any resolution escaping the owned root, including encoded traversal and symlink/reparse-point escape where applicable.
 
-Symbolic links or reparse points that escape an application-owned evidence root must not be followed for artifact serving or cleanup.
+Cleanup never targets source repositories, Desktop, Documents, Downloads, arbitrary temp roots, or caller-supplied folders.
 
-Cleanup never targets Desktop, Documents, Downloads, source repositories, arbitrary temporary directories, or a caller supplied path.
+## 12. Run ownership and atomic persistence
 
-## 12. Run directory ownership
+Each run owns one generated directory. Creation is fail-if-exists.
 
-Each run owns exactly one generated directory.
+Critical manifest transitions are durably written before downstream logic assumes them.
 
-A run may create only beneath its own directory except for intentionally shared immutable application metadata.
+Use same-directory temporary write plus flush/fsync where practical and atomic rename/replace semantics supported by the platform. A crash must leave the prior valid state or a detectable incomplete write, not silently accepted truncated JSON.
 
-One run cannot overwrite another run's manifest or artifacts.
+On startup, incomplete temporary files are diagnosed. The product uses the last valid authoritative state and does not invent completion.
 
-Creation uses fail-if-exists semantics for the generated run directory.
+## 13. Manifest validation and schema evolution
 
-## 13. Atomic persistence
+Persisted state is untrusted on reload. Validate it against the versioned schema before use.
 
-Lifecycle transitions that later logic depends on must be durably written before that logic proceeds.
+Malformed or unsupported manifests are never executed as valid run truth.
 
-For critical JSON state, write to a sibling temporary file, flush where practical, then atomically replace or rename to the authoritative filename.
+One damaged historical run must not crash global history. It remains visible through a bounded damaged-run projection with an actionable diagnostic where possible.
 
-A crash during write must leave either the previous valid manifest or a detectable incomplete temporary file. It must not silently create valid-looking truncated JSON.
+Version one does not auto-migrate unknown future schema versions.
 
-On startup, incomplete temporary files are diagnosed and the owning run is marked or recovered according to the last valid durable state.
+## 14. Evidence integrity
 
-## 14. Manifest validation
+Each finalized durable artifact receives a SHA256 digest recorded in integrity metadata.
 
-Persisted manifests are untrusted on reload because users, crashes, old versions, or disk faults may alter them.
+A finalized artifact is served/displayed only after run ownership and integrity validation.
 
-The application validates manifests against a versioned schema before using them.
+Missing, substituted, or hash-mismatched evidence yields `EVIDENCE_INVALID` or a documented equivalent rather than being displayed under a valid evidence label.
 
-Malformed manifests are not executed or treated as valid run truth.
+Active runs may expose explicitly unsealed evidence before finalization; the UI must distinguish it from finalized evidence.
 
-A malformed historical run may remain visible as a damaged run entry with diagnostics, but the application must not crash the entire history view because one run is corrupt.
+## 15. Report generation
 
-## 15. Evidence integrity
+HTML and JSON reports derive from validated authoritative run state.
 
-Every final durable evidence artifact receives a SHA256 digest recorded in the integrity manifest.
+The HTML report escapes every untrusted value and requires no JavaScript in version one.
 
-The application verifies an artifact's identity before displaying or exporting it from a finalized run.
+Reports reference only artifacts owned by the run.
 
-Digest mismatch yields `EVIDENCE_INVALID` or an equivalent explicit state. It must not silently display the mismatched artifact under a valid evidence label.
+The report is a projection of the manifest, not a second source of truth.
 
-Partial active runs may display newly created artifacts before final integrity sealing, but the UI must distinguish active/unsealed evidence from finalized evidence.
+## 16. Remote resource ledger
 
-## 16. HTML report generation
+Every Solari resource created by ReproDocket is registered immediately.
 
-The HTML report is generated only from validated authoritative run state.
-
-The report generator escapes every untrusted field and references only artifacts owned by the run.
-
-The report must be readable without JavaScript. JavaScript is unnecessary for the first report format and should not be embedded.
-
-This makes the report safer to open and easier to archive.
-
-## 17. Remote resource ownership
-
-Every Solari resource created by ReproDocket is registered immediately in a resource ledger before dependent work begins.
-
-Minimum ledger fields:
+Minimum ledger information:
 
 ```text
-resourceType
-resourceId
-owningRunId
-createdAt
-releaseRequestedAt
-releaseConfirmedAt
-lastKnownState
-cleanupError
+resource type
+resource ID
+owning run ID/validation ID
+created time
+release requested time
+release confirmed time
+last known state
+cleanup error
 ```
 
-Resource identity is not inferred from a list of all account resources when an explicit creation result is available.
+Use explicit creation-returned identity rather than guessing ownership from an account-wide resource list.
 
 ReproDocket cleans up only resources it can prove it owns.
 
-## 18. Browser lifecycle
+## 17. Browser lifecycle
 
-The normal browser lifecycle is:
-
-```text
-create -> register ownership -> use -> stop evidence capture -> close -> confirm local adapter completion
-```
-
-Every creation path uses `try/finally` or an equivalent structured cleanup boundary.
-
-The investigation browser and verification browser are independent owned resources.
-
-A successful run cannot claim cleanup PASS until both have reached their required terminal state.
-
-## 19. Sandbox lifecycle
-
-Harness-owned Solari sandboxes exist only to host deterministic fixtures.
-
-The sandbox lifecycle is:
+Normal attempt lifecycle:
 
 ```text
-create -> register ownership -> connect -> deploy fixture -> start server -> verify command exit code -> obtain preview URL -> externally probe preview -> use -> kill -> confirm cleanup result
+create
+-> register ownership
+-> create/use page
+-> capture evidence
+-> stop collectors
+-> close browser
+-> record close result
+-> resolve replay state within bounded policy
 ```
 
-The harness explicitly kills the sandbox. It does not rely on the provider's idle pause or timeout behavior.
+Every creation path has structured cleanup.
 
-If `kill()` fails, functional scenario assertions may still be recorded, but the lifecycle gate fails and the validation run is not FULL PASS.
+Investigation and verification browsers are independent resources. Verification is created only after the investigation browser close attempt reaches the required boundary.
 
-## 20. Local process ownership
+A run cannot claim cleanup PASS while either required browser remains unresolved.
 
-The ReproDocket local server writes an ownership record into an application-owned runtime directory.
+## 18. Sandbox lifecycle
 
-Minimum identity fields:
+Harness-owned sandboxes exist only for deterministic fixture validation/demo support.
+
+Lifecycle:
+
+```text
+create
+-> register ownership
+-> connect
+-> verify runtime
+-> write fixture
+-> start fixture server
+-> verify command/process readiness
+-> obtain preview URL
+-> externally verify fixture identity
+-> use
+-> kill
+-> record teardown result
+```
+
+The harness explicitly kills the sandbox. Provider idle pause/timeout is not accepted as teardown.
+
+A failed kill may preserve functional test observations, but Full lifecycle result fails until cleanup is truthfully reconciled.
+
+## 19. Local process ownership
+
+The local server writes an application-owned runtime record containing enough identity to reject recycled PIDs:
 
 ```text
 pid
-processStartTime
+process start identity
 port
-bindAddress
-repositoryOrBuildIdentity
-instanceNonce
-startedAt
+bind address
+repository/build identity
+instance nonce
+started time
 ```
 
-`stop.ps1` reads the record and confirms the current process still matches the recorded identity before requesting termination.
+`stop.ps1` verifies current process identity before termination. PID equality alone is insufficient.
 
-PID equality alone is not sufficient because operating systems reuse process IDs.
+If ownership cannot be proven, leave the process alone and report the condition.
 
-If ownership cannot be proven, the script reports the condition and leaves the process untouched.
+## 20. Port selection
 
-## 21. Port selection
+The preferred port is a convenience, not ownership.
 
-The application begins with a preferred loopback port but treats it as a preference, not ownership.
+If occupied by another process, select another loopback port. Never terminate an unrelated process to obtain the preferred port.
 
-If another process already owns that port, ReproDocket selects an available loopback port and records it.
+If a valid already-running ReproDocket instance belonging to the current application is authoritatively identified, normal start reuses/opens it rather than creating a duplicate.
 
-It never terminates an unrelated process merely to claim the preferred port.
-
-## 22. Active run concurrency
+## 21. Active run concurrency
 
 Version one supports one executing investigation pipeline per ReproDocket process.
 
-This is an explicit supported capacity, not a hidden cap.
+This capacity is explicit. A second submission receives `RUN_ALREADY_ACTIVE`; it is not silently discarded or queued.
 
-When a run is active, a second submission receives an explicit `RUN_ALREADY_ACTIVE` response and the UI explains that the current run must finish or be cancelled before another starts.
+Historical browsing remains available while a run is active.
 
-Version one does not silently queue requests. A queue should not exist until it is fully implemented and tested.
+Do not add a queue until queue persistence, cancellation, ordering, shutdown, and UI behavior are fully designed and tested.
 
-The restriction applies only to active execution. Historical run browsing remains available while a run is active.
+## 22. Duplicate submission
 
-## 23. Duplicate submissions
+Client-side button disabling is convenience only.
 
-The Investigate action becomes disabled after the server accepts the request and returns the authoritative run identity.
+Server admission is atomic so rapid double submission/racing requests admit exactly one external pipeline.
 
-Client-side disabling is not the only guard. The server enforces the active-run state atomically so rapid double clicks or duplicate requests cannot create multiple pipelines.
+The accepted request returns the authoritative run identity before the UI navigates to active detail.
 
-Tests must race two submissions and prove only one external pipeline can be admitted.
+## 23. Cancellation
 
-## 24. Cancellation
-
-Cancellation is part of the supported lifecycle rather than a process kill shortcut.
+Cancellation is lifecycle behavior, not process killing.
 
 A cancellation request:
 
-1. identifies the currently owned run,
-2. records cancellation requested,
-3. stops scheduling new browser actions,
-4. allows active action cleanup to settle within a bounded time,
-5. closes owned browser sessions,
-6. kills an owned fixture sandbox if one belongs to that run,
-7. persists the terminal `CANCELLED` lifecycle state,
-8. records cleanup failures without converting them to success.
+1. identifies the owned active run,
+2. records request state,
+3. stops scheduling new actions,
+4. propagates an abort signal through current work,
+5. allows bounded action cleanup,
+6. closes owned browsers,
+7. kills an owned fixture sandbox if one belongs to that harness operation,
+8. persists `CANCELLED` only when the lifecycle reaches that truth,
+9. records cleanup failures separately.
 
-If cancellation cannot finish safely within the timeout, the run is not falsely marked clean. The application reports the remaining owned resource uncertainty.
+The UI does not optimistically declare `CANCELLED` when only the request has been acknowledged.
 
-## 25. Application shutdown
+If cleanup cannot be proven, surface the remaining uncertainty.
 
-Normal application shutdown first stops accepting new investigations.
+## 24. Application shutdown
 
-If a run is active, shutdown follows the same bounded ownership-aware cleanup path as cancellation.
+Graceful shutdown stops accepting new investigations first.
 
-The local process must not simply exit and abandon known remote resources when it has enough time and authority to release them.
+An active run follows the same ownership-aware abort/cleanup path as cancellation.
 
-A forced OS termination can still occur. Startup recovery handles that case separately.
+Known remote resources are not intentionally abandoned merely because the local server is stopping.
 
-## 26. Crash and restart recovery
+Forced OS/process death remains possible and is handled by restart recovery.
 
-At startup, ReproDocket scans only its own run and runtime state.
+## 25. Crash/restart recovery
 
-Runs left in nonterminal lifecycle states from a previous process are classified as `INTERRUPTED` unless authoritative recovery logic can prove continued ownership and resume is explicitly supported.
+Startup scans only ReproDocket-owned runtime/run state.
 
-Version one does not automatically resume browser action execution after a process crash.
+A nonterminal run owned by a previous process becomes `INTERRUPTED` unless a future explicitly designed resume mechanism exists. Version one never automatically resumes/replays target mutations after a crash.
 
-That conservative behavior avoids replaying external actions unexpectedly.
+Valid partial evidence is preserved.
 
-The application preserves all valid evidence captured before interruption.
+If a prior ledger suggests a provider resource may remain alive, cleanup is attempted only when ownership and current provider contract make that action sufficiently authoritative. Otherwise record unresolved cleanup rather than guessing against account-wide resources.
 
-If previous resource ledger entries indicate a browser or sandbox may still exist, the application may attempt cleanup only when the recorded identity and current provider contract make ownership sufficiently authoritative. Otherwise it reports unresolved cleanup rather than acting on unrelated resources.
+## 26. Retry policy
 
-## 27. Retry policy
+Retries are centralized and operation-aware.
 
-Retries are centralized rather than scattered throughout adapters.
-
-A retry decision records:
+Each retry decision records:
 
 ```text
 operation
-attempt
-maximumAttempts
+attempt/max attempts
 reason
-idempotencySafety
+idempotency safety
 backoff
 ```
 
-Only known transient and safely repeatable operations are retried automatically.
+Automatically retry only known transient, safely repeatable control-plane operations.
 
-Browser actions that can mutate the target application are not blindly retried after an unknown outcome. An unknown mutation result becomes an explicit uncertainty state so the verifier does not accidentally perform a duplicate destructive action.
+Do not blindly retry target mutations after an unknown action outcome.
 
-## 28. Timeouts
+Do not rapid-spin on 429/capacity failures. Honor authoritative retry guidance where provided.
 
-Every external stage has a bounded timeout.
+Provider 502/503/504 may be candidates for bounded retry only for safe operations; current Solari docs/type/observed behavior govern exact policy.
 
-Timeouts are stage-specific and diagnostic. At minimum there are separate budgets for:
+## 27. Timeouts
 
-* Solari resource creation,
-* navigation,
-* individual browser interaction,
-* replay readiness polling,
-* sandbox command execution,
-* fixture preview readiness,
-* cancellation cleanup,
-* application health startup.
-
-A timeout identifies the stage and run rather than surfacing as a generic `operation failed` message.
-
-## 29. Logging
-
-Application logs are diagnostic but not the source of truth for run outcome.
-
-Logs include stable event names, run ID, lifecycle stage, and sanitized error classifications.
-
-Logs do not include the Solari key, cookies, authorization headers, password values, unrestricted target HTML, or unrestricted request/response bodies.
-
-Log retention is bounded and separate from durable run evidence.
-
-## 30. Error taxonomy
-
-The product should use stable internal error codes so UI messages, tests, and diagnostics do not depend on exact exception prose.
-
-Initial codes should include at least:
+Every external stage has a bounded diagnostic timeout, including:
 
 ```text
-INVALID_TARGET_URL
-BLOCKED_TARGET_NETWORK
-SOLARI_CREDENTIAL_MISSING
-SOLARI_CREDENTIAL_INVALID
-SOLARI_BROWSER_CREATE_FAILED
-SOLARI_SANDBOX_CREATE_FAILED
-SOLARI_CAPACITY_REACHED
-NAVIGATION_TIMEOUT
-ACTION_TIMEOUT
-ACTION_OUTCOME_UNKNOWN
-EVIDENCE_WRITE_FAILED
-EVIDENCE_INVALID
-RUN_ALREADY_ACTIVE
-RUN_NOT_FOUND
-RUN_MANIFEST_INVALID
-REPLAY_NOT_READY
-REPLAY_UNAVAILABLE
-RESOURCE_CLEANUP_FAILED
-LOCAL_PORT_UNAVAILABLE
-LOCAL_REQUEST_REJECTED
+provider readiness
+Solari resource creation
+page/navigation
+individual action
+expectation wait
+replay readiness
+sandbox command
+fixture preview readiness
+cancellation cleanup
+local startup health
 ```
 
-Public UI copy should remain concise and human-readable while logs and machine-readable reports retain the stable code.
+Timeout errors identify the stage/run rather than becoming a generic failure message.
 
-## 31. Public error messages
+## 28. Logging
 
-Errors shown in the UI answer three questions:
+Application logs aid diagnosis but are not outcome authority.
 
-1. What could not be completed?
-2. What is known about the run?
-3. What can the user safely do next?
+Logs may include stable event name, run ID, lifecycle stage, attempt role, and sanitized error classification.
 
-They do not expose stack traces, local absolute source paths, package cache locations, raw provider response bodies, or credentials.
+Logs do not intentionally contain the Solari key, secret-bearing headers, unrestricted target bodies/HTML/storage, or signed provider capabilities classified as secrets.
 
-Detailed developer diagnostics remain local and sanitized.
+User-authored source plan data belongs in the run manifest and should not be redundantly dumped to general logs.
 
-## 32. Dependency and supply-chain boundary
+Log retention is bounded and separate from durable evidence.
 
-Runtime dependencies are kept small and purpose-driven.
+## 29. Error taxonomy
 
-Every dependency added to `dependencies` must be used by the shipped product. Test-only and build-only packages belong in `devDependencies`.
+Use stable internal codes so UI/tests do not depend on provider prose. Initial set includes at least:
 
-The lockfile is committed.
+```text
+INVALID_REQUEST
+INVALID_PLAN_STATEMENT
+PLAN_EXPECTATION_REQUIRED
+INVALID_TARGET_URL
+BLOCKED_TARGET_NETWORK
+LOCAL_REQUEST_REJECTED
+SOLARI_CREDENTIAL_MISSING
+SOLARI_CREDENTIAL_INVALID
+SOLARI_UNAVAILABLE
+SOLARI_CAPACITY_REACHED
+SOLARI_BROWSER_CREATE_FAILED
+SOLARI_SANDBOX_CREATE_FAILED
+NAVIGATION_FAILED
+ACTION_FAILED
+AMBIGUOUS_TARGET_ELEMENT
+TARGET_ELEMENT_NOT_FOUND
+EXPECTATION_INSUFFICIENT
+EVIDENCE_WRITE_FAILED
+EVIDENCE_INVALID
+RUN_NOT_FOUND
+RUN_ALREADY_ACTIVE
+RUN_DAMAGED
+REPLAY_PENDING
+REPLAY_UNAVAILABLE
+CANCELLATION_FAILED
+CLEANUP_FAILED
+```
 
-Before final publication, validation records `npm audit` or the chosen equivalent and classifies findings by actual reachability and severity rather than blindly claiming zero risk.
+Map raw provider/system exceptions to these at boundaries. Preserve a sanitized diagnostic cause without exposing secrets.
 
-An automated dependency update is not accepted until the real build and applicable tests pass again.
+## 30. Security failure behavior
 
-## 33. Browser profile boundary
+Security-policy failures fail closed at their real boundary.
 
-Saved Solari browser profiles are outside ReproDocket version one.
+Examples:
 
-The product must not create, enumerate, mutate, or persist Solari login profiles unless that capability is explicitly added later with a separate privacy and lifecycle review.
+```text
+blocked target -> no Solari browser created
+foreign-origin mutation -> no state change
+invalid nonce -> no state change
+artifact mismatch -> no bytes served
+manifest integrity failure -> no valid evidence claim
+credential verification failure -> provider not READY
+```
 
-Authentication-required target workflows may therefore become INCONCLUSIVE in version one unless the target itself provides a non-sensitive test login through the supported workflow.
+Do not convert security policy failure into a normal target result.
 
-## 34. Captcha, proxy, and stealth boundary
+## 31. Required security/lifecycle validation
 
-The initial deterministic fixture does not require proxy or captcha features.
+Validation includes deterministic tests for:
 
-ReproDocket should use the simplest Solari browser mode that truthfully exercises the target. It must not silently enable paid proxy or captcha behavior merely to make a test pass.
+```text
+loopback-only bind
+Host/Origin/nonce mutation protection
+URL/IP blocked ranges
+redirect policy to strongest enforceable boundary
+artifact traversal/cross-run rejection
+manifest corruption/tampering
+static report escaping
+React inert target/user content
+Solari-key and known provider-secret redaction
+plan-persistence warning and nonsecret-plan documentation
+credential plaintext absence from protected-store bytes/command line
+atomic persistence interruption
+run collision prevention
+duplicate/racing submission
+cancellation at multiple stages
+browser cleanup on success/failure
+sandbox cleanup on success/failure
+stale PID/process ownership refusal
+retry bounds
+Node handle/process exit
+restart to INTERRUPTED
+```
 
-If stealth is later required for a real target, the run records that mode as part of provenance.
+The security suite also deliberately mutates critical guards to prove its tests can fail.
 
-## 35. Evidence export boundary
+## 32. Explicit nonclaims
 
-Version one may generate a local HTML and JSON report inside the run directory.
+Version one does not claim:
 
-It does not automatically upload evidence to GitHub, cloud storage, or another external service.
+```text
+formal security certification
+formal WCAG certification
+perfect arbitrary-secret detection
+screenshot/replay redaction
+safe handling of real secrets inside reproduction plans
+authenticated workflow secret injection
+universal SSRF prevention beyond observable/enforceable network boundaries
+multiuser isolation
+enterprise identity
+remote-hosted ReproDocket service
+```
 
-Any future upload or issue-creation integration requires explicit user action and a separate external mutation boundary.
-
-## 36. Validation security cases
-
-The security suite must include deterministic tests for:
-
-* blocked file/data/javascript schemes,
-* loopback and private IP literal blocking,
-* cloud metadata target blocking,
-* same-origin mutation enforcement,
-* invalid local session nonce,
-* path traversal attempts,
-* encoded path traversal attempts,
-* cross-run artifact access attempts,
-* malicious HTML in problem descriptions,
-* malicious HTML in console text,
-* malicious HTML in page titles,
-* fake Solari key redaction,
-* authorization header redaction,
-* malformed run manifests,
-* tampered evidence hashes,
-* duplicate investigation requests,
-* shutdown during active run,
-* cleanup failure reporting,
-* stale PID ownership record,
-* occupied preferred port,
-* unexpected Host header.
-
-Each case must fail in a way that is observable at the real boundary it protects.
-
-## 37. Security completion gate
-
-The security and lifecycle category is not complete until:
-
-1. the loopback service is not unintentionally network-exposed,
-2. mutation requests are protected from unrelated web origins,
-3. target URL policy rejects prohibited schemes and internal destinations,
-4. secrets are protected at rest and redacted before persistence,
-5. untrusted target text cannot execute in the UI or HTML report,
-6. evidence paths cannot escape their run ownership boundary,
-7. duplicate submissions cannot create duplicate pipelines,
-8. browser, sandbox, and local process ownership is explicit,
-9. cancellation and shutdown close owned resources,
-10. interrupted runs remain truthful and recoverable as records,
-11. failure injection proves the guards actually reject invalid states, and
-12. a fresh full validation after security changes passes before publication.
-
-Any unproven item remains an explicit blocker or limitation rather than being assumed secure.
+These are truthful scope boundaries, not hidden missing features.
