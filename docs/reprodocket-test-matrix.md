@@ -3,537 +3,508 @@
 Date: August 31, 2026
 Status: Pre-implementation acceptance matrix
 
-This matrix is the minimum initial validation catalog for ReproDocket version one. Tests may be added as implementation reveals new failure classes. Removing or weakening a listed case requires an explicit design reason and equivalent coverage.
-
-The matrix distinguishes cheap deterministic tests from live Solari tests so normal development does not create unnecessary billable sessions. A final FULL validation still requires the live authorities.
+This is the minimum version-one validation catalog. Implementation may add tests as new failure classes are discovered. Listed coverage may not be silently weakened or removed. A final FULL validation requires the applicable live Solari authorities as well as local deterministic authorities.
 
 ## Result vocabulary
 
-Test result:
+Test result: `PASS`, `FAIL`, `BLOCKED`, `SKIPPED_NOT_APPLICABLE`.
 
-```text
-PASS
-FAIL
-BLOCKED
-SKIPPED_NOT_APPLICABLE
-```
+Run lifecycle: `CREATED`, `PREPARING`, `INVESTIGATING`, `VERIFYING`, `FINALIZING`, `COMPLETED`, `FAILED`, `CANCELLED`, `INTERRUPTED`.
 
-Product run lifecycle:
+Run outcome: `VERIFIED`, `REPRODUCED`, `NOT_REPRODUCED`, `INCONCLUSIVE`.
 
-```text
-CREATED
-PREPARING
-INVESTIGATING
-VERIFYING
-FINALIZING
-COMPLETED
-FAILED
-CANCELLED
-INTERRUPTED
-```
+A test-runner result is never interchangeable with a product outcome.
 
-Product investigation outcome:
+## A. Static, repository, and contract validation
 
-```text
-VERIFIED
-REPRODUCED
-NOT_REPRODUCED
-INCONCLUSIVE
-```
-
-A test runner result must never be confused with a product investigation outcome.
-
-## A. Static and repository validation
-
-| ID | Test | Expected authority | Live Solari |
-| --- | --- | --- | --- |
-| A001 | TypeScript compile | No type errors | No |
-| A002 | Production UI build | Build exits zero and emits expected static bundle | No |
-| A003 | Server build | Server entry compiles for supported Node runtime | No |
-| A004 | ESLint | No configured lint errors | No |
-| A005 | Format policy | Tracked product files satisfy configured formatter | No |
-| A006 | Lockfile tracked | `reprodocket/package-lock.json` is not ignored and is present after dependency install | No |
-| A007 | Generated output ignored | dist, coverage, reports, runtime state, local runs, and secrets are excluded from Git | No |
-| A008 | Secret pattern scan | No real or fixture-identical secret in tracked files | No |
-| A009 | Public private-path scan | Public docs do not contain developer-specific absolute paths | No |
-| A010 | Public placeholder scan | Product UI/public docs contain no accidental TODO/FIXME/stub/sample-only claims at release gate | No |
-| A011 | Dependency role check | Runtime packages used by product are in dependencies; test/build packages are devDependencies | No |
-| A012 | Unsupported import guard | Production code does not import fixture implementation | No |
-| A013 | Fixture identity guard | Production code does not branch on known fixture route/scenario IDs to force expected outcomes | No |
-
-## B. Core model and lifecycle unit tests
-
-| ID | Test | Expected authority | Live Solari |
-| --- | --- | --- | --- |
-| B001 | New run state | New run begins CREATED with no outcome | No |
-| B002 | Legal transition CREATED to PREPARING | Accepted | No |
-| B003 | Legal transition PREPARING to INVESTIGATING | Accepted | No |
-| B004 | Legal transition INVESTIGATING to VERIFYING | Accepted | No |
-| B005 | Legal transition VERIFYING to FINALIZING | Accepted | No |
-| B006 | Legal transition FINALIZING to COMPLETED | Accepted | No |
-| B007 | Failure transition | Any active state can move to FAILED through defined failure path | No |
-| B008 | Cancel transition | Active state can move to CANCELLED through defined cancellation path | No |
-| B009 | Restart interruption | Nonterminal persisted prior-process run becomes INTERRUPTED | No |
-| B010 | Terminal immutability | COMPLETED/FAILED/CANCELLED/INTERRUPTED cannot silently return to active | No |
-| B011 | Completed not reproduced | COMPLETED + NOT_REPRODUCED is valid | No |
-| B012 | Failed not healthy | FAILED cannot imply NOT_REPRODUCED | No |
-| B013 | Verified evidence requirement | VERIFIED rejected without first-run evidence | No |
-| B014 | Verified second evidence requirement | VERIFIED rejected without verification-run evidence | No |
-| B015 | Verified distinct sessions | VERIFIED rejected when investigation and verification session IDs match | No |
-| B016 | Reproduced definition | First run defect + unsuccessful clean confirmation produces REPRODUCED, not VERIFIED | No |
-| B017 | Not reproduced definition | Sufficient workflow completion with no defect produces NOT_REPRODUCED | No |
-| B018 | Inconclusive definition | Insufficient authoritative observation produces INCONCLUSIVE | No |
-| B019 | Evidence conflict | Contradictory evidence fails toward uncertainty rather than VERIFIED | No |
-| B020 | Stable error codes | Known failures map to stable machine codes independent of exception prose | No |
-
-## C. Target URL security tests
-
-| ID | Input | Expected | Live Solari |
-| --- | --- | --- | --- |
-| C001 | `https://example.com` | Accepted | No |
-| C002 | `http://example.com` | Accepted | No |
-| C003 | `file:///C:/Windows/win.ini` | INVALID_TARGET_URL | No |
-| C004 | `javascript:alert(1)` | INVALID_TARGET_URL | No |
-| C005 | `data:text/html,...` | INVALID_TARGET_URL | No |
-| C006 | `blob:https://example.com/...` | INVALID_TARGET_URL as top-level target | No |
-| C007 | `https://user:pass@example.com` | Rejected credentials-in-URL | No |
-| C008 | `http://localhost` | BLOCKED_TARGET_NETWORK | No |
-| C009 | `http://foo.localhost` | BLOCKED_TARGET_NETWORK | No |
-| C010 | `http://device.local` | BLOCKED_TARGET_NETWORK | No |
-| C011 | `http://127.0.0.1` | BLOCKED_TARGET_NETWORK | No |
-| C012 | `http://127.12.2.3` | BLOCKED_TARGET_NETWORK | No |
-| C013 | `http://10.0.0.1` | BLOCKED_TARGET_NETWORK | No |
-| C014 | `http://172.16.0.1` | BLOCKED_TARGET_NETWORK | No |
-| C015 | `http://172.31.255.255` | BLOCKED_TARGET_NETWORK | No |
-| C016 | `http://192.168.1.1` | BLOCKED_TARGET_NETWORK | No |
-| C017 | `http://169.254.169.254` | BLOCKED_TARGET_NETWORK | No |
-| C018 | `http://[::1]` | BLOCKED_TARGET_NETWORK | No |
-| C019 | IPv6 unique-local literal | BLOCKED_TARGET_NETWORK | No |
-| C020 | IPv6 link-local literal | BLOCKED_TARGET_NETWORK | No |
-| C021 | Malformed host | INVALID_TARGET_URL | No |
-| C022 | Whitespace-only URL | INVALID_TARGET_URL | No |
-| C023 | Public URL redirect to blocked local address | Navigation aborted or INCONCLUSIVE, never accepted as valid target | Conditional live fixture |
-| C024 | DNS resolves to private address | Rejected where resolution check can be authoritatively performed | Conditional live fixture |
-
-## D. Local server security tests
-
-| ID | Test | Expected | Live Solari |
-| --- | --- | --- | --- |
-| D001 | Bind address | Server listens on loopback, not all interfaces | No |
-| D002 | Unexpected Host | Rejected | No |
-| D003 | Same-origin GET | Allowed where route is read-only | No |
-| D004 | Same-origin mutation | Allowed with valid local session nonce | No |
-| D005 | Foreign Origin mutation | LOCAL_REQUEST_REJECTED | No |
-| D006 | Missing nonce mutation | LOCAL_REQUEST_REJECTED | No |
-| D007 | Wrong nonce mutation | LOCAL_REQUEST_REJECTED | No |
-| D008 | Wildcard CORS probe | No wildcard CORS response | No |
-| D009 | CSP present | Restrictive production CSP returned | No |
-| D010 | MIME sniffing header | `nosniff` present | No |
-| D011 | Referrer policy | No-referrer or equally restrictive configured policy | No |
-| D012 | Path traversal `../` | Rejected | No |
-| D013 | Encoded traversal `%2e%2e` | Rejected | No |
-| D014 | Cross-run artifact ID | Cannot fetch artifact not owned by requested run | No |
-| D015 | Symlink/reparse escape where supported | Artifact server refuses escape | No |
-
-## E. Secret storage and redaction tests
-
-| ID | Test | Expected | Live Solari |
-| --- | --- | --- | --- |
-| E001 | Missing credential | Provider state Not configured | No |
-| E002 | Environment credential precedence | Environment source selected when present | No |
-| E003 | Protected store fallback | Stored encrypted credential selected when env missing | No |
-| E004 | Plaintext absent at rest | Protected store file does not contain submitted plaintext | No |
-| E005 | PowerShell helper stdin | Secret does not appear in child command line | No |
-| E006 | Round trip protect/unprotect | Current user can recover exact test secret | No |
-| E007 | Wrong/invalid protected payload | Sanitized storage error, no crash | No |
-| E008 | Fake Solari key in console text | Redacted before persistence | No |
-| E009 | Bearer header | Header value not persisted | No |
-| E010 | Cookie header | Not persisted | No |
-| E011 | Set-Cookie header | Not persisted | No |
-| E012 | Password action value | Not persisted in timeline | No |
-| E013 | Secret in provider exception | Sanitized before log/report/UI | No |
-| E014 | Secret scan generated output | Known injected fake secret absent from JSON/HTML/logs | No |
-
-## F. Persistence and evidence integrity tests
-
-| ID | Test | Expected | Live Solari |
-| --- | --- | --- | --- |
-| F001 | Unique run directory | Two runs never share a directory | No |
-| F002 | Fail-if-exists creation | Existing run ID is never overwritten | No |
-| F003 | Atomic manifest update | Readers see prior valid or new valid manifest, not truncated JSON | No |
-| F004 | Malformed manifest | Run isolated as damaged; history service remains available | No |
-| F005 | Unsupported manifest version | Explicit incompatible/damaged state | No |
-| F006 | Hash generation | Final artifacts receive SHA256 digests | No |
-| F007 | Hash verification | Untampered artifact validates | No |
-| F008 | Tampered artifact | EVIDENCE_INVALID | No |
-| F009 | Missing finalized artifact | EVIDENCE_INVALID or explicit missing state | No |
-| F010 | Cross-run file swap | Digest/ownership validation rejects it | No |
-| F011 | Active unsealed evidence | UI can distinguish from finalized evidence | No |
-| F012 | Restart reload | Completed run reloads with same authoritative outcome | No |
-| F013 | Interrupted reload | Prior active run becomes INTERRUPTED without re-executing actions | No |
-| F014 | Damaged one run | Other valid history rows still load | No |
-| F015 | Report JSON parity | report.json derives from same authoritative run as UI | No |
-| F016 | HTML parity | Key outcome/steps/evidence match report.json | No |
-| F017 | Malicious HTML problem text | Escaped in report | No |
-| F018 | Malicious page title | Escaped in report | No |
-| F019 | Malicious console text | Escaped in report | No |
-| F020 | Report works without script | Human-readable static HTML | No |
-
-## G. API and coordinator integration tests
-
-| ID | Test | Expected | Live Solari |
-| --- | --- | --- | --- |
-| G001 | Create investigation valid request | Returns authoritative run ID | No with adapter double |
-| G002 | Invalid request shape | 4xx with stable code | No |
-| G003 | Invalid target | Rejected before adapter invocation | No |
-| G004 | Active run duplicate | RUN_ALREADY_ACTIVE | No |
-| G005 | Racing two creates | Exactly one admitted | No |
-| G006 | Get run | Returns persisted authority | No |
-| G007 | List history | Stable ordering and truthful status | No |
-| G008 | Missing run | RUN_NOT_FOUND | No |
-| G009 | Damaged run | Does not crash list endpoint | No |
-| G010 | Cancel active run | Cancellation state propagated | No with adapter double |
-| G011 | Cancel terminal run | Safe deterministic response; no second cleanup | No |
-| G012 | SSE initial state | Subscriber receives current authoritative state | No |
-| G013 | SSE transition sequence | Events preserve lifecycle order | No |
-| G014 | SSE reconnect | Client can recover state from authoritative GET even if events were missed | No |
-| G015 | Evidence route valid artifact | Serves owned artifact with correct MIME | No |
-| G016 | Evidence route invalid artifact | Rejected | No |
-| G017 | Replay unavailable | API returns explicit replay state, not broken link | No |
-| G018 | Local server graceful stop | Stops accepting new work before cleanup | No |
-
-## H. Local UI user-boundary tests
-
-These tests use the real built ReproDocket local application and a browser automation runner. They must not substitute direct API calls for the claimed user workflow.
-
-| ID | Test | Expected | Live Solari |
-| --- | --- | --- | --- |
-| H001 | First launch no key | Connection surface visible and understandable | No |
-| H002 | Invalid key submit | Sanitized failure shown; not READY | Optional live credential test |
-| H003 | Valid configured state | New Investigation form reachable | No with prepared secret store; live in FULL |
-| H004 | Target required | Form prevents empty submit and server agrees | No |
-| H005 | Problem required | Form prevents empty submit and server agrees | No |
-| H006 | Optional steps omitted | Submission remains valid | No |
-| H007 | Submit investigation | Navigates/progresses to authoritative active run | No with adapter double; live in E2E |
-| H008 | Double click Investigate | One run only | No |
-| H009 | Active progress | Current stage updates without page refresh | No |
-| H010 | Browser refresh during active run | Rehydrates current state | No |
-| H011 | Browser back/forward | Does not corrupt active run or history | No |
-| H012 | Completed VERIFIED detail | Outcome and two evidence authorities visible | No fixture state; live E2E validates truth |
-| H013 | Completed NOT_REPRODUCED detail | Correct outcome text, no false error styling | No |
-| H014 | Completed INCONCLUSIVE detail | Reason and safe next action visible | No |
-| H015 | REPRODUCED detail | Distinct from VERIFIED | No |
-| H016 | History ordering | Recent runs visible and selectable | No |
-| H017 | History/detail consistency | Same outcome/lifecycle across surfaces | No |
-| H018 | Screenshot viewer | Correct run-owned image displayed | No |
-| H019 | Console view | Sanitized evidence rendered as text | No |
-| H020 | Network view | Sanitized method/url/status/failure rendered | No |
-| H021 | Timeline view | Ordered actions/stages visible | No |
-| H022 | Replay ready | Working control shown only when available | No state test; live contract later |
-| H023 | Replay pending | Pending state, not dead link | No |
-| H024 | Replay unavailable | Explicit unavailable state | No |
-| H025 | Cancel visible active run | Cancellation request and terminal state visible | No with adapter double; live cancellation later |
-| H026 | Error state navigation | User can return to history/new investigation safely | No |
-| H027 | Damaged historical run | History remains usable and damage is explicit | No |
-| H028 | Narrow viewport | No critical horizontal overflow | No |
-| H029 | 100 percent desktop scale baseline | Primary controls/text readable | No + human |
-| H030 | 125/150 percent browser zoom smoke | Critical workflow remains usable | No + human |
-| H031 | Keyboard navigation | Main form, history, evidence tabs, and cancel path keyboard reachable | No + human spot check |
-| H032 | Accessible names | Critical form controls/buttons expose names/roles | No |
-| H033 | Focus visibility | Keyboard focus is visually discoverable | No + human |
-| H034 | Malicious target text | Displayed as text, not executed | No |
-| H035 | No dead controls | Every visible interaction has a real or truthfully disabled behavior | No |
-
-## I. Solari browser live contract tests
-
-These tests use the real installed `@solarisdk/browser` package and a real Solari account.
-
-| ID | Test | Expected | Live Solari |
-| --- | --- | --- | --- |
-| I001 | Client construction | Current SDK accepts configured credential/base URL | Yes |
-| I002 | Browser create | Session ID returned | Yes |
-| I003 | New page | Page available | Yes |
-| I004 | Navigate public fixture/example | Final URL/title observable | Yes |
-| I005 | Locator interaction | Real element can be read/clicked/fill as fixture requires | Yes |
-| I006 | Screenshot bytes | Nonempty valid PNG/JPEG as configured | Yes |
-| I007 | Console capture | Known fixture console error observed when triggered | Yes |
-| I008 | Page error capture | Known fixture uncaught error observed when triggered | Yes |
-| I009 | Network failure/status capture | Known fixture failing request observed | Yes |
-| I010 | Recording create | Session created with recording enabled | Yes |
-| I011 | Close browser | Adapter close completes | Yes |
-| I012 | Process handle cleanup | Test process exits without leaked client handle | Yes |
-| I013 | Replay readiness | Bounded polling reaches Ready or truthful Unavailable/timeout state | Yes |
-| I014 | Replay URL | Valid replay URL retrieved when documented path succeeds | Yes |
-| I015 | Replay download probe | If installed TS SDK exposes supported download, bytes are retained and identified; otherwise capability remains unsupported without failure | Yes |
-| I016 | Distinct session creation | Two sequential launch calls yield different IDs | Yes |
-| I017 | 429 handling | Capacity classification does not blindly rapid-retry | Yes only when safely inducible; otherwise deterministic adapter error test |
-| I018 | 502/503/504 policy | Bounded retry classifier treats as eligible only for safe operations | Deterministic policy test; live occurrence not required |
-
-## J. Solari sandbox live contract tests
-
-| ID | Test | Expected | Live Solari |
-| --- | --- | --- | --- |
-| J001 | Sandbox client construction | Current package compiles and connects | Yes |
-| J002 | Sandbox create | Owned sandbox ID returned | Yes |
-| J003 | Connect | Control channel available | Yes |
-| J004 | Write fixture file | File operation succeeds | Yes |
-| J005 | Run fixture command | Transport success plus command exitCode 0 | Yes |
-| J006 | Background server start | Fixture server remains available after command returns | Yes |
-| J007 | Preview URL | Current package preview method returns URL | Yes |
-| J008 | External preview probe | URL returns expected fixture identity outside sandbox | Yes |
-| J009 | Kill sandbox | Kill completes | Yes |
-| J010 | No reliance on idle pause | Harness explicitly requests kill | Yes |
-| J011 | Failed command | Nonzero command exit is recognized as failure | Yes or deterministic harmless bad command |
-| J012 | Cleanup after setup exception | Owned sandbox still killed | Yes |
-
-## K. Deterministic fixture truth tests
-
-These tests validate the fixture independently from ReproDocket classification so the oracle itself is trustworthy.
-
-| ID | Scenario | Ground truth assertion | Live Solari |
-| --- | --- | --- | --- |
-| K001 | Account save blank panel | Exact action deterministically causes panel to become blank and emits defined evidence cue | Local fixture + live preview in FULL |
-| K002 | Account save reset | New fixture session starts from clean state | Local + live |
-| K003 | Billing route refresh | Defined route refresh deterministically returns/lands in 404 state | Local + live |
-| K004 | Missing ZIP validation | Form accepts prohibited missing ZIP and emits defined success cue | Local + live |
-| K005 | Healthy profile save | Valid save remains visible and returns expected confirmation | Local + live |
-| K006 | Healthy login validation | Invalid login is handled by intended validation rather than target crash | Local + live |
-| K007 | Ambiguous case | Fixture intentionally withholds enough evidence for deterministic classification | Local + live |
-| K008 | Fixture version identity | Served fixture exposes non-secret version used in validation provenance | Local + live |
-| K009 | No ReproDocket special route | Fixture truth is independent from product implementation | Source guard |
-
-## L. Full investigation and verification tests
-
-| ID | Scenario | Expected product result | Live Solari |
-| --- | --- | --- | --- |
-| L001 | Account save defect first + second run | VERIFIED | Yes |
-| L002 | Billing refresh defect first + second run | VERIFIED | Yes |
-| L003 | Missing ZIP defect first + second run | VERIFIED | Yes |
-| L004 | Healthy profile save | NOT_REPRODUCED | Yes |
-| L005 | Healthy login validation | NOT_REPRODUCED | Yes |
-| L006 | Ambiguous report | INCONCLUSIVE | Yes |
-| L007 | First run defect, second run intentionally nonrepeatable fixture variant | REPRODUCED | Yes if fixture can model without production branching |
-| L008 | Distinct session IDs | First and second IDs differ for every verification attempt | Yes |
-| L009 | First session closed before second | No overlapping reuse unless design later explicitly requires overlap | Yes |
-| L010 | Evidence attribution | Investigation artifacts owned by first authority, verification by second | Yes |
-| L011 | Final manifest | Contains both authorities and final classification | Yes |
-| L012 | Local UI projection | UI shows same final outcome and evidence IDs as manifest | Yes |
-| L013 | Restart after completion | Same run still available after local server restart | Yes for run generation, local restart no additional live session |
-| L014 | Cleanup | All harness-owned browsers and fixture sandbox closed/killed | Yes |
-
-## M. Failure injection and recovery tests
-
-| ID | Failure | Required result | Live Solari |
-| --- | --- | --- | --- |
-| M001 | Missing credential | No session created; actionable local message | No |
-| M002 | Invalid credential | Not READY; sanitized provider error | Yes once with invalid test value |
-| M003 | Browser creation adapter failure | Run FAILED/INCONCLUSIVE by policy; no false healthy outcome | No |
-| M004 | Real browser create failure when naturally encountered | Same truthful handling | Opportunistic |
-| M005 | Navigation timeout | INCONCLUSIVE or FAILED per stage policy; evidence preserved | Local adapter + live fixture delay test if economical |
-| M006 | Target 500 | Target condition recorded; classification depends on report, never infrastructure success | Yes fixture |
-| M007 | Browser dies mid-run | Partial evidence preserved; cleanup reconciled | Adapter deterministic; live only if safely inducible |
-| M008 | Evidence write failure | EVIDENCE_WRITE_FAILED and no COMPLETED claim | No using controlled unwritable/failing store |
-| M009 | Verification browser unavailable | First result may be REPRODUCED/INCONCLUSIVE but never VERIFIED | No + opportunistic live |
-| M010 | Replay initially 404/not ready | Bounded poll continues without misclassifying main run | Yes |
-| M011 | Replay never ready within budget | Run can complete with REPLAY_UNAVAILABLE if replay is noncritical and evidence sufficient | Yes if naturally reproducible; deterministic otherwise |
-| M012 | Sandbox create failure | E2E BLOCKED/FAIL, no browser run against nonexistent fixture | No + opportunistic live |
-| M013 | Fixture command nonzero | Fixture setup fails; sandbox cleanup still attempted | Yes |
-| M014 | Fixture preview not reachable | No investigation begins; cleanup occurs | Yes or deterministic transport double |
-| M015 | Preferred local port occupied | Alternate loopback port chosen; unrelated process untouched | No |
-| M016 | Stale PID record | Unrelated/recycled process not killed | No |
-| M017 | App termination with active run simulated | Restart marks run INTERRUPTED | No |
-| M018 | Graceful shutdown active run | Cancellation cleanup path executes | No + live final smoke |
-| M019 | Cancel during navigation | New actions stop; owned resources close; CANCELLED persisted | No + live final smoke |
-| M020 | Cancel during verification | No false VERIFIED; resources close | No + live final smoke |
-| M021 | Malformed persisted run | Isolated damage, application remains usable | No |
-| M022 | Missing screenshot after finalization | Evidence invalid state | No |
-| M023 | Cross-run screenshot substitution | Evidence invalid state | No |
-| M024 | Foreign-origin POST | Request rejected without state mutation | No |
-| M025 | Duplicate submission race | One admitted, one RUN_ALREADY_ACTIVE | No |
-
-## N. Horizontal connectivity tests
-
-| ID | Compared surfaces | Required invariant |
+| ID | Test | Required result |
 | --- | --- | --- |
-| N001 | Active UI vs run manifest | Same lifecycle state |
-| N002 | History vs run detail | Same lifecycle and outcome |
+| A001 | TypeScript compile | No type errors |
+| A002 | Production UI build | Exit zero and expected static bundle |
+| A003 | Server build | Server entry compiles for supported Node runtime |
+| A004 | ESLint | No configured lint errors |
+| A005 | Format policy | Tracked product files satisfy formatter |
+| A006 | Lockfile tracking | `reprodocket/package-lock.json` present and not ignored after install |
+| A007 | Generated-output hygiene | dist, coverage, reports, runtime state, local runs, secrets ignored |
+| A008 | Secret scan | No real credential in tracked files |
+| A009 | Private-path scan | Public docs contain no developer-specific absolute paths |
+| A010 | Placeholder/public-copy scan | No accidental TODO/FIXME/stub/sample-only production claims at release gate |
+| A011 | Dependency roles | Runtime dependencies and dev dependencies correctly classified |
+| A012 | Fixture import guard | Production code does not import fixture implementation |
+| A013 | Fixture identity guard | Production code does not branch on fixture scenario/route to force outcome |
+| A014 | Contract identifier consistency | Production uses current `PlanStatement`, `ParsedPlanStatement`, `parsePlanStatements` names |
+| A015 | Documentation consistency | No active doc states that the version-one plan is optional |
+
+## B. Plan parsing, request validation, lifecycle, and classification
+
+| ID | Test | Required result |
+| --- | --- | --- |
+| B001 | Action grammar | Every supported action parses and preserves quoted case |
+| B002 | Expectation grammar | Every supported expectation parses |
+| B003 | Unknown statement | `INVALID_PLAN_STATEMENT` before external work |
+| B004 | Trailing garbage | Rejected |
+| B005 | Empty required quoted value | Rejected |
+| B006 | Missing/empty plan | Rejected |
+| B007 | Action-only plan | `PLAN_EXPECTATION_REQUIRED` or documented validation equivalent |
+| B008 | Expectation-only plan | Rejected for missing executable action |
+| B009 | Complete plan | At least one action plus one expectation accepted |
+| B010 | New run | `CREATED`, no outcome |
+| B011 | CREATED -> PREPARING | Legal |
+| B012 | PREPARING -> INVESTIGATING | Legal |
+| B013 | INVESTIGATING -> VERIFYING | Legal |
+| B014 | VERIFYING -> FINALIZING | Legal |
+| B015 | FINALIZING -> COMPLETED | Legal |
+| B016 | Failure transition | Defined active states can enter `FAILED` |
+| B017 | Cancellation transition | Defined active states can enter `CANCELLED` |
+| B018 | Restart interruption | Prior-process nonterminal run becomes `INTERRUPTED` |
+| B019 | Terminal immutability | Terminal lifecycle cannot silently become active |
+| B020 | Completed negative result | `COMPLETED + NOT_REPRODUCED` valid |
+| B021 | Failed is not healthy | `FAILED` does not imply `NOT_REPRODUCED` |
+| B022 | VERIFIED first authority | Rejected without investigation reproduction evidence |
+| B023 | VERIFIED second authority | Rejected without verification reproduction evidence |
+| B024 | VERIFIED session independence | Rejected when session IDs match or are null |
+| B025 | REPRODUCED definition | First confirms, clean second does not confirm |
+| B026 | NOT_REPRODUCED definition | Sufficient workflow plus tested defect expectation not observed |
+| B027 | INCONCLUSIVE definition | Insufficient/ambiguous authority remains uncertain |
+| B028 | Conflicting evidence | Does not promote to VERIFIED |
+| B029 | Stable error codes | Machine code independent of raw exception prose |
+
+## C. Target URL and navigation safety
+
+| ID | Input/condition | Required result |
+| --- | --- | --- |
+| C001 | `https://example.com` | Accepted |
+| C002 | `http://example.com` | Accepted |
+| C003 | `file:///...` | `INVALID_TARGET_URL` |
+| C004 | `javascript:...` | `INVALID_TARGET_URL` |
+| C005 | `data:...` | `INVALID_TARGET_URL` |
+| C006 | top-level `blob:` | Rejected |
+| C007 | credentials embedded in URL | Rejected |
+| C008 | `localhost` | `BLOCKED_TARGET_NETWORK` |
+| C009 | subdomain of `.localhost` | Blocked |
+| C010 | `.local` target | Blocked |
+| C011 | IPv4 loopback including 127/8 | Blocked |
+| C012 | RFC1918 10/8 | Blocked |
+| C013 | RFC1918 172.16/12 | Blocked |
+| C014 | RFC1918 192.168/16 | Blocked |
+| C015 | IPv4 link-local | Blocked |
+| C016 | common metadata address `169.254.169.254` | Blocked |
+| C017 | IPv6 loopback | Blocked |
+| C018 | IPv6 unique-local | Blocked |
+| C019 | IPv6 link-local | Blocked |
+| C020 | malformed host/URL | Rejected |
+| C021 | public redirect to prohibited destination | Abort or truthful INCONCLUSIVE; never accepted silently |
+| C022 | DNS resolves privately | Block where authoritative resolution data is available; otherwise limitation documented |
+| C023 | absolute `OPEN`/`WAIT_FOR_URL`/`EXPECT_URL` destination | Same policy as initial target |
+| C024 | redirect after initial allowed URL | Revalidated at strongest available browser/provider boundary |
+
+## D. Local service and artifact security
+
+| ID | Test | Required result |
+| --- | --- | --- |
+| D001 | Listener bind | Loopback only |
+| D002 | Unexpected Host | Rejected |
+| D003 | Same-origin read | Allowed where read-only |
+| D004 | Same-origin mutation + valid nonce | Allowed |
+| D005 | Foreign Origin mutation | `LOCAL_REQUEST_REJECTED` |
+| D006 | Missing nonce mutation | Rejected |
+| D007 | Wrong nonce mutation | Rejected |
+| D008 | CORS | No wildcard CORS |
+| D009 | CSP | Restrictive production policy present |
+| D010 | MIME sniffing | `nosniff` present |
+| D011 | Referrer policy | Restrictive policy present |
+| D012 | `../` artifact traversal | Rejected |
+| D013 | encoded traversal | Rejected |
+| D014 | cross-run artifact ID | Rejected |
+| D015 | symlink/reparse escape where supported | Rejected |
+| D016 | malformed/oversized mutation payload | Bounded safe error |
+| D017 | unsupported content type | Rejected where mutation endpoint expects JSON |
+
+## E. Secret storage and redaction
+
+| ID | Test | Required result |
+| --- | --- | --- |
+| E001 | Missing credential | Provider state Not configured |
+| E002 | Environment credential | Used when explicitly present |
+| E003 | Protected-store fallback | Used when environment value absent |
+| E004 | Plaintext at rest | Submitted secret absent from protected store bytes |
+| E005 | PowerShell credential helper | Secret absent from child command line |
+| E006 | Protect/unprotect | Current user recovers exact fake test secret |
+| E007 | Invalid protected payload | Sanitized error, no crash |
+| E008 | Fake Solari key in text | Redacted before persistence |
+| E009 | Authorization header | Not persisted |
+| E010 | Cookie header | Not persisted |
+| E011 | Set-Cookie header | Not persisted |
+| E012 | Sensitive fill/password value | Not echoed in durable timeline/logs |
+| E013 | Secret in provider exception | Sanitized before UI/report/log |
+| E014 | Generated-output secret scan | Injected fake secret absent from durable artifacts |
+
+## F. Persistence, evidence, reporting, and integrity
+
+| ID | Test | Required result |
+| --- | --- | --- |
+| F001 | Unique run directory | No collision/overwrite |
+| F002 | Existing run ID | Fail rather than overwrite |
+| F003 | Atomic manifest update | Reader sees old valid or new valid state, not truncation |
+| F004 | Malformed manifest | Damaged run isolated; history remains available |
+| F005 | Unsupported schema | Explicit incompatible/damaged state |
+| F006 | Artifact hash | SHA256 generated at finalization |
+| F007 | Untampered artifact | Integrity validation succeeds |
+| F008 | Tampered artifact | `EVIDENCE_INVALID` |
+| F009 | Missing finalized artifact | Invalid/missing state, not valid display |
+| F010 | Cross-run file substitution | Ownership/integrity rejects |
+| F011 | Active unsealed evidence | Distinguishable from finalized evidence |
+| F012 | Completed restart/reload | Same authoritative outcome |
+| F013 | Interrupted restart | Becomes `INTERRUPTED` without replaying actions |
+| F014 | One damaged run | Other history remains usable |
+| F015 | report.json parity | Same authoritative run data as UI |
+| F016 | HTML parity | Same core outcome/plan/evidence as JSON |
+| F017 | Malicious problem text | Escaped/inert |
+| F018 | Malicious page title | Escaped/inert |
+| F019 | Malicious console text | Escaped/inert |
+| F020 | Static report | Human readable with JavaScript disabled |
+| F021 | Artifact lookup | Uses run ID + artifact ID, never user path |
+| F022 | Evidence sequence | Stable monotonic ordering within run |
+
+## G. API, coordinator, events, and concurrency
+
+| ID | Test | Required result |
+| --- | --- | --- |
+| G001 | Valid create request | 202/authoritative run ID after durable creation |
+| G002 | Invalid shape | 4xx stable code |
+| G003 | Invalid target/plan | Rejected before Solari adapter invocation |
+| G004 | Second active run | `RUN_ALREADY_ACTIVE` |
+| G005 | Racing creates | Exactly one admitted |
+| G006 | Get run | Persisted authority returned |
+| G007 | List history | Stable truthful ordering |
+| G008 | Missing run | `RUN_NOT_FOUND` |
+| G009 | Damaged run | Does not crash history endpoint |
+| G010 | Cancel active run | Cancellation request propagated |
+| G011 | Cancel terminal run | Deterministic no-op/error; no second cleanup |
+| G012 | SSE first event | Current authoritative snapshot |
+| G013 | SSE transitions | Ordered run sequence |
+| G014 | SSE reconnect | GET rehydrates truth before/with new subscription |
+| G015 | Valid artifact | Correct owned bytes and MIME |
+| G016 | Invalid artifact | Rejected |
+| G017 | Replay unavailable | Explicit state, no dead link |
+| G018 | Graceful local stop | Stops admission before cleanup/exit |
+
+## H. Built local UI user-boundary tests
+
+The claimed UI workflow must be driven through the built local application, not substituted by direct internal calls.
+
+| ID | Test | Required result |
+| --- | --- | --- |
+| H001 | First launch without key | Connection surface understandable |
+| H002 | Invalid key | Sanitized failure; not READY |
+| H003 | Valid configured state | New Investigation reachable |
+| H004 | Target required | Client feedback and server rejection agree |
+| H005 | Problem required | Client feedback and server rejection agree |
+| H006 | Plan completeness | Omitted/empty, action-only, and expectation-only plans rejected; complete plan accepted |
+| H007 | Submit investigation | Navigates to authoritative active run |
+| H008 | Rapid double submit | One run only |
+| H009 | Active progress | Updates without full page refresh |
+| H010 | Browser refresh during run | Rehydrates current state |
+| H011 | Browser back/forward | Does not corrupt run/history |
+| H012 | VERIFIED detail | Two independent evidence authorities visible |
+| H013 | NOT_REPRODUCED detail | Clear negative result, not styled as infrastructure failure |
+| H014 | INCONCLUSIVE detail | Reason and next action visible |
+| H015 | REPRODUCED detail | Visually/semantically distinct from VERIFIED |
+| H016 | History order/select | Recent runs discoverable and selectable |
+| H017 | History/detail parity | Same lifecycle/outcome |
+| H018 | Screenshot viewer | Correct run-owned image |
+| H019 | Console view | Sanitized text |
+| H020 | Page-error view | Sanitized text tied to correct attempt |
+| H021 | Network view | Sanitized method/URL/status/failure |
+| H022 | Timeline | Ordered plan/lifecycle/evidence events |
+| H023 | Replay ready | Actionable only when authoritative state ready |
+| H024 | Replay pending/unavailable | Truthful non-actionable state |
+| H025 | Cancel | Request then terminal server-backed state |
+| H026 | Error-state navigation | Safe return to history/new run |
+| H027 | Damaged historical run | Explicit damage; app remains usable |
+| H028 | Narrow viewport | No critical horizontal overflow |
+| H029 | 100% desktop scale | Primary text/controls readable |
+| H030 | 125/150% browser zoom | Critical workflow remains usable |
+| H031 | Keyboard navigation | Main form/history/evidence/cancel reachable |
+| H032 | Accessible names/roles | Critical controls exposed |
+| H033 | Focus visibility | Keyboard focus visible |
+| H034 | Malicious target/user text | Rendered inertly |
+| H035 | No dead controls | Every visible interaction works or is truthfully disabled |
+
+## I. Live Solari browser contract
+
+| ID | Test | Required result |
+| --- | --- | --- |
+| I001 | Client construction | Installed package accepts current credential path |
+| I002 | Browser create | Real session ID |
+| I003 | New page | Page usable |
+| I004 | Navigate public target | Final URL/title observable |
+| I005 | Locator interaction | Real click/fill/read works |
+| I006 | Screenshot | Nonempty valid image bytes |
+| I007 | Console capture | Known fixture console signal observed |
+| I008 | Page error | Known fixture uncaught error observed |
+| I009 | Network signal | Known fixture failed/status request observed |
+| I010 | Recording | Session created with recording enabled |
+| I011 | Browser close | Close completes |
+| I012 | Client/process shutdown | No leaked SDK handle prevents process exit |
+| I013 | Replay readiness | Bounded poll -> ready or truthful unavailable/timeout |
+| I014 | Replay URL | Valid URL when supported/documented path succeeds |
+| I015 | Replay download capability | Local bytes only if installed TS SDK exposes proven API |
+| I016 | Sequential fresh sessions | Distinct IDs |
+| I017 | Capacity/429 policy | No blind rapid retry |
+| I018 | 502/503/504 policy | Retry eligible only for safe bounded operation |
+
+## J. Live Solari sandbox contract
+
+| ID | Test | Required result |
+| --- | --- | --- |
+| J001 | Sandbox client | Installed package compiles/connects |
+| J002 | Create | Owned sandbox ID |
+| J003 | Control connection | Commands/files available |
+| J004 | Write fixture | Succeeds |
+| J005 | Run command | Transport succeeds and exit code checked |
+| J006 | Background server | Remains reachable after start command returns |
+| J007 | Preview URL | Current package returns public URL |
+| J008 | External probe | Expected fixture identity reachable outside VM |
+| J009 | Kill | Explicit teardown completes |
+| J010 | Idle behavior | Harness never substitutes pause/timeout for kill |
+| J011 | Nonzero command | Recognized as failure |
+| J012 | Setup exception | Owned sandbox still receives teardown attempt |
+
+## K. Deterministic fixture truth
+
+These tests validate the fixture independently from ReproDocket classification.
+
+| ID | Scenario | Ground-truth assertion |
+| --- | --- | --- |
+| K001 | Account blank panel | Save causes panel failure plus defined page-error cue |
+| K002 | Account reset | Fresh browser begins clean |
+| K003 | Billing refresh | Initial route works; same-browser refresh produces defined 404 |
+| K004 | Missing ZIP | Invalid address is accepted and displays defined cue |
+| K005 | Healthy profile | Healthy confirmation appears; alleged defect condition absent |
+| K006 | Healthy login | Intended validation appears; alleged crash condition absent |
+| K007 | Ambiguous control | Plan cannot choose uniquely; authority insufficient |
+| K008 | Nonrepeatable scenario | First clean attempt confirms, second clean attempt does not |
+| K009 | Fixture version | Public nonsecret fixture version available for provenance |
+| K010 | Product independence | No production route/scenario hardcoding |
+
+## L. Full investigation and verification
+
+| ID | Scenario | Required result |
+| --- | --- | --- |
+| L001 | Account blank first + second | VERIFIED |
+| L002 | Billing refresh first + second | VERIFIED |
+| L003 | Missing ZIP first + second | VERIFIED |
+| L004 | Healthy profile | NOT_REPRODUCED |
+| L005 | Healthy login | NOT_REPRODUCED |
+| L006 | Ambiguous target/action | INCONCLUSIVE |
+| L007 | Nonrepeatable fixture | REPRODUCED |
+| L008 | Session identity | Investigation/verification IDs non-null and different |
+| L009 | Session ordering | First closed before second created |
+| L010 | Evidence attribution | Artifacts owned by correct attempt |
+| L011 | Final manifest | Both attempts + classification present |
+| L012 | Local UI parity | UI outcome/evidence IDs match manifest |
+| L013 | Restart | Completed run still available without new Solari work |
+| L014 | Cleanup | All harness-owned browsers/sandbox reconciled |
+
+## M. Failure injection and recovery
+
+| ID | Failure | Required behavior |
+| --- | --- | --- |
+| M001 | Missing credential | No external resource; actionable message |
+| M002 | Invalid credential | Not READY; sanitized error |
+| M003 | Browser create failure | No false healthy result |
+| M004 | Page create/navigation failure | Partial state preserved; truthful failure/uncertainty |
+| M005 | Navigation timeout | No false negative defect conclusion |
+| M006 | Target 500 | Target evidence, not infrastructure success |
+| M007 | Browser dies mid-run | Partial evidence preserved; cleanup reconciled |
+| M008 | Evidence write failure | `EVIDENCE_WRITE_FAILED`; no COMPLETED |
+| M009 | Verification unavailable | Never VERIFIED |
+| M010 | Replay initially not ready | Bounded polling without changing defect outcome |
+| M011 | Replay never ready within budget | Truthful replay state; main run may complete if replay noncritical |
+| M012 | Sandbox create failure | E2E fails/blocks before browser fixture use |
+| M013 | Fixture command nonzero | Setup fails; teardown still attempted |
+| M014 | Preview unreachable | No investigation against nonexistent fixture |
+| M015 | Preferred local port occupied | Alternate port; foreign process untouched |
+| M016 | Stale PID | Foreign/recycled process untouched |
+| M017 | Process termination with active run | Restart yields INTERRUPTED |
+| M018 | Graceful shutdown active run | Admission stops and cleanup executes |
+| M019 | Cancel during navigation | New actions stop; CANCELLED persisted |
+| M020 | Cancel during verification | Never false VERIFIED |
+| M021 | Malformed run | Isolated damage |
+| M022 | Missing final artifact | Invalid evidence state |
+| M023 | Cross-run substitution | Rejected |
+| M024 | Foreign-origin POST | No mutation |
+| M025 | Duplicate submission race | One admitted, one explicit rejection |
+
+## N. Horizontal connectivity
+
+| ID | Compared surfaces | Invariant |
+| --- | --- | --- |
+| N001 | Active UI vs manifest | Same lifecycle |
+| N002 | History vs detail | Same lifecycle/outcome |
 | N003 | Outcome badge vs report JSON | Same final outcome |
-| N004 | HTML report vs report JSON | Same target, problem, steps, outcomes, key evidence IDs |
-| N005 | Screenshot UI vs manifest | Every shown image belongs to manifest; missing entries not invented |
-| N006 | Console UI vs persisted console | Same sanitized event set/order within documented normalization |
-| N007 | Network UI vs persisted network | Same sanitized event set/order within documented normalization |
-| N008 | Replay button vs replay state | Button available only when authoritative replay reference is ready |
-| N009 | Cleanup badge vs resource ledger | PASS only when required resources terminal/closed |
-| N010 | Credential UI vs credential authority | READY only after configured source validated |
-| N011 | Validation summary vs current Git revision | Revision identity matches run metadata |
-| N012 | README capability table vs validation state | No capability claimed Available without applicable completion gate |
-| N013 | Error UI vs machine code | Human message corresponds to correct stable error code |
-| N014 | Cancel UI vs lifecycle | Cancelled display backed by terminal CANCELLED state |
-| N015 | History after restart vs prior history | No disappeared valid run without explicit retention action |
+| N004 | HTML vs JSON report | Same core data/evidence IDs |
+| N005 | Screenshot UI vs manifest | Every shown image owned by run |
+| N006 | Console UI vs artifact | Same sanitized ordered entries |
+| N007 | Page-error UI vs artifact | Same sanitized ordered entries |
+| N008 | Network UI vs artifact | Same sanitized ordered entries |
+| N009 | Replay control vs replay record | Action only when ready |
+| N010 | Cleanup badge vs resource ledger | PASS only when required resources resolved |
+| N011 | Credential UI vs provider authority | READY only after verified source |
+| N012 | Validation summary vs Git revision | Exact current revision |
+| N013 | README/capability claims vs validation | No premature Available claim |
+| N014 | Error UI vs error code | Correct human projection |
+| N015 | Cancel UI vs lifecycle | Terminal display backed by persisted state |
+| N016 | History after restart | Valid runs do not disappear |
 
-## O. Vertical connectivity tests
+## O. Vertical connectivity
 
-| ID | User outcome | Required vertical path |
+| ID | User outcome | Required path |
 | --- | --- | --- |
-| O001 | Configure credential | UI -> API -> secret service -> protected store -> verification -> persisted readiness metadata -> UI |
-| O002 | Start investigation | UI -> validation -> coordinator -> run store -> Solari browser -> evidence -> UI progress |
-| O003 | Verify defect | First evidence -> first cleanup -> second Solari session -> second evidence -> classifier -> manifest -> UI |
-| O004 | View screenshot | Run detail -> artifact ID -> manifest ownership -> integrity check -> artifact response -> browser render |
-| O005 | View replay | Run detail -> replay state -> stored reference/data -> safe presentation |
-| O006 | Cancel | UI -> API -> coordinator -> cancellation signal -> resource cleanup -> terminal persistence -> UI |
-| O007 | Restart and history | process start -> run store scan -> schema/integrity validation -> history API -> UI |
-| O008 | Damaged historical evidence | persisted damage -> validator -> damaged run projection -> UI diagnostic without global crash |
-| O009 | Full fixture validation | validation script -> sandbox -> fixture -> public preview -> browser A -> browser B -> local store -> local UI -> cleanup -> validation report |
+| O001 | Configure credential | UI -> API -> protected store -> verification -> provider state -> UI |
+| O002 | Start run | UI -> validation -> coordinator -> store -> Solari browser -> evidence -> progress UI |
+| O003 | Verify defect | first evidence -> first cleanup -> fresh second browser -> second evidence -> classifier -> manifest -> UI |
+| O004 | View screenshot | detail -> artifact ID -> ownership -> hash -> bytes -> render |
+| O005 | View replay | detail -> replay record -> local/reference authority -> safe action/state |
+| O006 | Cancel | UI -> API -> coordinator -> signal -> cleanup -> persistence -> UI |
+| O007 | Restart/history | startup -> store scan -> schema/integrity -> history API -> UI |
+| O008 | Damaged history | persisted damage -> validator -> damaged projection -> UI without global crash |
+| O009 | Full fixture | validator -> sandbox -> preview -> browser A -> browser B -> store -> UI -> cleanup -> report |
 
-## P. Resource and lifetime tests
+## P. Resource and lifetime
 
-| ID | Test | Expected | Live Solari |
-| --- | --- | --- | --- |
-| P001 | Browser close normal | Resource ledger records requested/completed close | Yes |
-| P002 | Browser close on exception | Close still attempted | Yes |
-| P003 | Verification browser close | Independent close recorded | Yes |
-| P004 | Sandbox kill normal | Kill recorded | Yes |
-| P005 | Sandbox kill on fixture failure | Kill still attempted | Yes |
-| P006 | Local server stop | Owned server stops | No |
-| P007 | Stop script ownership mismatch | Process untouched | No |
-| P008 | Repeated start | Existing owned instance reused rather than duplicated | No |
-| P009 | Foreign preferred port | Foreign process untouched | No |
-| P010 | Open Node handles | Normal validation process terminates cleanly | No + live browser contract |
-| P011 | Temporary file cleanup | Only run-owned temporary files removed/renamed | No |
-| P012 | Cleanup failure | Visible as failure, not swallowed | No |
+| ID | Test | Required result |
+| --- | --- | --- |
+| P001 | Browser normal close | Requested/completed recorded |
+| P002 | Browser close on exception | Still attempted |
+| P003 | Verification browser close | Independent close recorded |
+| P004 | Sandbox normal kill | Recorded |
+| P005 | Sandbox kill on setup failure | Still attempted |
+| P006 | Local server stop | Owned server stops |
+| P007 | Ownership mismatch | Foreign process untouched |
+| P008 | Repeated start | Existing owned instance reused, not duplicated |
+| P009 | Foreign preferred port | Foreign process untouched |
+| P010 | Open Node handles | Normal close lets process terminate |
+| P011 | Temporary cleanup | Only known generated owned files affected |
+| P012 | Cleanup failure | Visible and blocks clean lifecycle claim |
+| P013 | Repeated local cycles | No listener/resource-record growth |
+| P014 | Bounded repeated live cycles | Unique sessions, clean closure each iteration |
 
-## Q. Visual and human QA catalog
+## Q. Visual, accessibility, and human QA catalog
 
-Automated assertions prepare evidence but do not replace subjective review.
-
-Required product views for final human review:
+Required current-build views for final human review:
 
 | ID | View/state | Required framing |
 | --- | --- | --- |
-| Q001 | First run connection | Full application context |
-| Q002 | New Investigation | Full context + form readability |
-| Q003 | Active Investigation | Full context + close view of progress states |
-| Q004 | VERIFIED result | Full detail + close evidence/outcome area |
-| Q005 | REPRODUCED result | Full detail |
-| Q006 | NOT_REPRODUCED result | Full detail |
-| Q007 | INCONCLUSIVE result | Full detail + reason/action area |
-| Q008 | History | Full context with several run types |
-| Q009 | Screenshot evidence | Close view of image viewer and provenance context |
-| Q010 | Console evidence | Close readable text |
-| Q011 | Network evidence | Close readable rows/details |
-| Q012 | Replay state | Ready and unavailable/pending states as applicable |
-| Q013 | Error condition | Representative sanitized failure |
-| Q014 | Narrow viewport | Full view at supported minimum width |
-| Q015 | Browser zoom/readability | Representative 125 or 150 percent inspection |
+| Q001 | Connection | Full app context |
+| Q002 | New Investigation | Full context + readable plan editor/help |
+| Q003 | Active Investigation | Full context + close progress area |
+| Q004 | VERIFIED | Detail + close outcome/evidence |
+| Q005 | REPRODUCED | Full detail |
+| Q006 | NOT_REPRODUCED | Full detail |
+| Q007 | INCONCLUSIVE | Detail + reason/next action |
+| Q008 | History | Several run types |
+| Q009 | Screenshot evidence | Image + provenance context |
+| Q010 | Console/page errors | Readable close view |
+| Q011 | Network | Readable rows/details |
+| Q012 | Replay | Ready and nonready states as applicable |
+| Q013 | Sanitized error | Representative failure |
+| Q014 | Narrow viewport | Full supported minimum width |
+| Q015 | 125/150% zoom | Critical workflow readable/usable |
 
-Human review checks:
+Human review checks visual hierarchy, readable text, no clipping/contradictions, clear lifecycle versus defect outcome, clear investigation versus verification authority, obvious run identity, truthful actionable controls, useful empty/error states, no implementation/debug prose, and professional polish. Escaped defects that automation could have caught require regression coverage.
 
-* visual hierarchy,
-* readable text,
-* no clipped or contradictory labels,
-* clear distinction between lifecycle failure and defect outcome,
-* clear distinction between investigation and verification evidence,
-* obvious current run identity,
-* evidence controls that look actionable only when they are actionable,
-* sensible empty states,
-* useful error copy,
-* no internal implementation prose leaking into product UI,
-* no debug output or raw stack traces,
-* no misleading visual success when evidence is incomplete.
+## R. Windows bootstrap and fresh-checkout validation
 
-Any defect a human finds that deterministic automation could reasonably have detected creates a new regression test before final closure.
-
-## R. Bootstrap and Windows automation tests
-
-| ID | Test | Expected |
+| ID | Test | Required result |
 | --- | --- | --- |
-| R001 | Run from repository root | Correct ReproDocket root found |
-| R002 | Run from another current directory | Script resolves its own location correctly |
-| R003 | PowerShell 5.1 bootstrap entry | Detects/reroutes to PowerShell 7 without parser failure |
-| R004 | PowerShell 7 present | No unnecessary installation |
-| R005 | Node supported | Continues |
-| R006 | Node missing | Safe automated install path attempted when package manager available |
-| R007 | Node unsupported old version | Clear upgrade path, not false PASS |
-| R008 | npm missing/broken | Preflight fails diagnostically |
-| R009 | Dependencies missing | Restore executes |
-| R010 | Lockfile present | `npm ci` used for deterministic restore after lock exists |
-| R011 | Insufficient disk reserve | Artifact-heavy/full validation stops before failure |
-| R012 | App already owned/running | Opens/reuses it |
-| R013 | Preferred port occupied foreign | Alternate port chosen |
-| R014 | Browser open failure | Server remains usable and URL printed clearly |
-| R015 | `stop.ps1` valid ownership | Stops only owned process |
-| R016 | `stop.ps1` stale ownership | Refuses unrelated process |
-| R017 | `validate.ps1` mandatory stage fail | Nonzero exit |
-| R018 | `validate.ps1` all required stages pass | Zero exit only after all authorities pass |
-| R019 | WMIC source scan | No `wmic` or `wmic.exe` in new scripts |
-| R020 | No user-folder scratch default | No Desktop/Downloads/Documents scratch output |
+| R001 | Run from repository root | Correct app root |
+| R002 | Run from another working directory | `$PSScriptRoot` resolution works |
+| R003 | Windows PowerShell 5.1 bootstrap entry | Can discover/route to PowerShell 7 without parser failure |
+| R004 | PowerShell 7 already present | No unnecessary install |
+| R005 | Supported Node | Continue |
+| R006 | Missing Node | Safe automated install path where package manager available |
+| R007 | Unsupported Node | Clear upgrade/block, not false PASS |
+| R008 | npm missing/broken | Diagnostic failure |
+| R009 | Dependencies missing | Restore |
+| R010 | Lockfile present | `npm ci` deterministic restore |
+| R011 | Low disk reserve | Full/evidence-heavy run stops before exhaustion |
+| R012 | App already running and owned | Reuse/open it |
+| R013 | Preferred port foreign-owned | Alternate loopback port |
+| R014 | Default browser open fails | Server stays usable and URL printed |
+| R015 | stop valid ownership | Only owned process stopped |
+| R016 | stop stale ownership | Foreign process refused |
+| R017 | mandatory validation stage fails | Nonzero exit |
+| R018 | all mandatory automated authorities pass | Zero only then |
+| R019 | WMIC scan | No new `wmic`/`wmic.exe` usage |
+| R020 | Scratch-path policy | No Desktop/Downloads/Documents default scratch |
 
-## S. Sensitivity and mutation checks for the harness
+## S. Harness sensitivity and deliberate mutation
 
-The validation harness itself must prove it can fail.
+At least one real mutation/red-green proof is required from every critical class.
 
-| ID | Deliberate regression | Test expected to fail |
+| ID | Deliberate defect | Guard that must fail |
 | --- | --- | --- |
-| S001 | Force classifier to return VERIFIED without second evidence | B014/B015/L008 |
-| S002 | Reuse investigation session ID as verification session | B015/L008 |
-| S003 | Disable URL scheme guard | C003/C004/C005 |
-| S004 | Disable private IP guard | C011-C020 |
-| S005 | Remove origin/nonce check | D005-D007 |
-| S006 | Render report field unescaped | F017-F019 |
-| S007 | Skip redaction | E008-E014 |
-| S008 | Serve arbitrary artifact path | D012-D015 |
-| S009 | Do not hash final screenshot | F006/F009 |
-| S010 | Show screenshot from another run | F010/N005 |
-| S011 | Permit two active pipelines | G004/G005/P008 |
-| S012 | Mark cancellation COMPLETED | B008/H025/O006 |
-| S013 | Swallow cleanup error | P012/L014 |
+| S001 | VERIFIED without second evidence | B023/B024/L008 |
+| S002 | Reuse first session ID | B024/L008 |
+| S003 | Disable scheme guard | C003-C006 |
+| S004 | Disable private-address guard | C008-C019 |
+| S005 | Remove origin/nonce guard | D005-D007 |
+| S006 | Render report unescaped | F017-F019 |
+| S007 | Disable redaction | E008-E014 |
+| S008 | Serve arbitrary/cross-run artifact | D012-D015/F010 |
+| S009 | Skip final hash | F006-F009 |
+| S010 | Display another run's screenshot | N005 |
+| S011 | Permit two active pipelines | G004/G005 |
+| S012 | Optimistically mark cancel terminal | H025/O006 |
+| S013 | Swallow cleanup failure | P012/L014 |
 | S014 | Skip sandbox kill | J009/J010/L014 |
-| S015 | Always classify target as broken | K005/K006/L004/L005 |
-| S016 | Always classify target healthy | K001/K003/K004/L001-L003 |
-| S017 | Fixture-specific hardcoded outcome | A012/A013/K009 |
-| S018 | Stale validation revision | N011/final provenance gate |
+| S015 | Always classify broken | K005/K006/L004/L005 |
+| S016 | Always classify healthy | K001/K003/K004/L001-L003 |
+| S017 | Hardcode fixture scenario result | A012/A013/K010 |
+| S018 | Accept stale revision evidence | N012/final provenance gate |
+| S019 | Treat plan as optional | B006-B009/H006 |
 
-At least representative guards from each critical class must undergo an actual red-green or mutation proof during implementation. Merely listing these sensitivity checks is not sufficient.
+A green suite that stays green under the defect it is supposed to guard is a harness failure.
 
 ## T. FULL validation acceptance
 
-A FULL validation run is accepted only when all applicable mandatory categories have current results for the exact source revision being claimed:
+FULL is accepted only when all applicable mandatory categories have current results for the exact source revision:
 
 ```text
-Static/repository
-Core unit
-Security unit
-Persistence/integrity
-Local integration
-Built local UI user boundary
-Solari browser contract
-Solari sandbox contract
-Fixture truth
-Full investigation/verification scenarios
-Failure/recovery
-Horizontal connectivity
-Vertical connectivity
-Resource/lifetime
-Bootstrap/runtime
-Visual evidence preparation
-Security/publication scans
+static/repository/contract
+plan/lifecycle/classification
+security
+persistence/integrity/reporting
+local API/integration
+built local UI user boundary
+real Solari browser contract
+real Solari sandbox contract
+fixture truth
+full investigation + verification
+failure/recovery
+horizontal connectivity
+vertical connectivity
+resource/lifetime
+Windows bootstrap/runtime
+visual evidence preparation
+public-source/documentation audit
 ```
 
-Human visual and usability review remains a separate final authority. A machine FULL PASS is not renamed to human QA PASS.
+Human visual/usability acceptance is separately recorded. Machine FULL PASS is not human QA PASS.
 
-## U. Execution economy
+## U. Validation economy
 
-Normal targeted development should run the cheapest authoritative checks first:
+Run the cheapest authoritative checks first:
 
 ```text
 changed unit tests
 -> affected integration tests
--> affected local UI tests
+-> affected built-UI tests
 -> build/lint/typecheck
 -> live Solari contract only when its boundary changed
--> full Solari E2E only at milestone and final gates
+-> full Solari end-to-end at milestone/final gates
 ```
 
-If a cheap deterministic test fails, the pipeline stops before creating unnecessary billable Solari resources.
-
-A final milestone or publication claim still requires the full live path regardless of cost optimization.
+A cheap deterministic failure stops the pipeline before unnecessary billable resources are created. Cost control never replaces required live proof for milestone or publication claims.
