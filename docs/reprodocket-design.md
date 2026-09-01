@@ -13,7 +13,7 @@ The product is designed to make browser defect reproduction more trustworthy. It
 
 The upstream Solari cookbook remains intact. ReproDocket is added as a first-class project under `reprodocket/`. The fork relationship, upstream examples, MIT license, and Pinetree Research copyright remain preserved.
 
-Solari is central to the shipped workflow. Production investigations and independent verification use real Solari cloud browsers. The deterministic full validation fixture is hosted in a real Solari sandbox. Unit and local integration tests may use test doubles where isolation is appropriate, but doubles cannot satisfy live Solari or end-to-end completion gates.
+Solari is central to the shipped workflow. Production investigations and independent verification use real Solari cloud browsers. The deterministic Full-validation fixture is hosted in a real Solari sandbox. Unit and local integration tests may use test doubles where isolation is appropriate, but doubles cannot satisfy live Solari or end-to-end completion gates.
 
 There is no silent local-browser fallback for a production investigation.
 
@@ -28,8 +28,8 @@ Version one supports this complete user path:
 5. Enter an auditable reproduction and observation plan using the supported plan grammar.
 6. Submit the run.
 7. ReproDocket validates the request before creating an external resource.
-8. ReproDocket creates a recorded Solari browser and executes the plan.
-9. It captures semantically useful screenshots, action timing, page errors, selected console evidence, selected network evidence, current URLs/status, and expectation results.
+8. ReproDocket creates a recorded Solari browser and executes the action statements in the plan.
+9. It evaluates the plan's observation expectations while capturing semantically useful screenshots, action timing, page errors, selected console evidence, selected network evidence, current URLs/status, and expectation results.
 10. It closes the investigation browser and records replay state.
 11. It creates a separate fresh recorded Solari browser.
 12. It executes the same validated plan as independent verification.
@@ -38,13 +38,15 @@ Version one supports this complete user path:
 15. The local interface shows investigation evidence, verification evidence, final outcome, replay state, cleanup state, and history.
 16. Completed runs remain available after ReproDocket restarts.
 
-Version one does not promise arbitrary autonomous bug discovery from prose alone. A future AI planner may generate the same auditable plan, but no runtime planner is required for the initial product.
+The plan is required and must contain at least one browser action and at least one observation expectation.
+
+Version one does not promise arbitrary autonomous bug discovery from prose alone. A future AI planner may generate the same auditable plan, but no runtime planner or second AI credential is required for the initial product.
 
 ## 4. Auditable plan model
 
 The plan has two kinds of statements: browser actions and observable expectations.
 
-Initial actions include:
+Initial actions:
 
 ```text
 OPEN
@@ -61,7 +63,7 @@ BACK
 FORWARD
 ```
 
-Initial expectations include:
+Initial expectations:
 
 ```text
 EXPECT_TEXT
@@ -75,7 +77,9 @@ The exact syntax and contracts are defined in [`reprodocket-interface-contracts.
 
 The grammar intentionally excludes arbitrary JavaScript, arbitrary CSS/XPath selectors, shell execution, direct DOM mutation, filesystem access, and local-process commands.
 
-A problem description explains the defect to a human. The plan explains what the browser should do and which observable condition defines success/failure. Neither one directly sets the final result.
+A problem description explains the defect to a human. The plan explains what the browser should do and which observable condition defines the reported defect. Neither one directly sets the final result.
+
+The source plan is intentionally persisted with the run. Version-one plan values must therefore be nonsecret test data. Authenticated workflows that require real password/token injection are outside the initial supported scope. The exact privacy boundary is defined in [`reprodocket-data-handling.md`](reprodocket-data-handling.md).
 
 ## 5. Result model
 
@@ -120,7 +124,11 @@ An infrastructure failure does not become `NOT_REPRODUCED`. A console warning or
 
 ReproDocket uses TypeScript on Node.js. This follows Solari's direct JavaScript/TypeScript browser path and avoids an unnecessary interoperability layer.
 
-Exact dependency versions are locked through `reprodocket/package-lock.json` after installation and live contract validation.
+With the selected Vite 8 toolchain, the Node compatibility floor is `22.12.0`. A fresh Windows bootstrap prefers the current supported Node LTS discovered at execution time; it does not force-upgrade an already compatible runtime that passes the actual dependency/build/test stack.
+
+Exact direct dependency versions and transitive resolution are locked through `reprodocket/package-lock.json` after execution-time registry checks and initial compatibility validation.
+
+The environment policy is defined in [`reprodocket-toolchain-baseline.md`](reprodocket-toolchain-baseline.md).
 
 ### 6.2 Local server and UI
 
@@ -128,17 +136,25 @@ Fastify provides the local service. React with Vite provides the local interface
 
 Server-Sent Events provide live progress updates. Durable run state remains the authority after reconnect or refresh.
 
+The UI contract is defined in [`reprodocket-ui-spec.md`](reprodocket-ui-spec.md).
+
 ### 6.3 Persistence
 
 Version one uses filesystem-based run storage under the current user's local application data directory. No database server, schema deployment, or manual migration step is required.
 
 Large/generated runtime evidence remains outside source control.
 
-### 6.4 Credentials
+### 6.4 Credentials and user-authored data
 
-The normal Windows path stores a Solari credential using the current Windows-user protection boundary. Environment-variable support remains available for automated/developer environments, but a normal user is not required to create an `.env` file.
+The normal Windows path stores the Solari API key using the current Windows-user protection boundary. Environment-variable support remains available for automated/developer environments, but a normal user is not required to create an `.env` file.
 
-Secrets are excluded from run manifests, evidence, reports, screenshots generated by ReproDocket itself, logs, process metadata, and public source. Target screenshots may still contain sensitive information visibly rendered by the target site; the product must state that limitation truthfully.
+The Solari API key, provider authorization headers, cookies, and other authoritatively known ReproDocket/provider secrets are excluded from normal durable run evidence and public source.
+
+User-authored target/problem/plan data is intentionally persisted because it is part of the reproduction record. The plan editor and public documentation must state that plan text is saved and that only nonsecret test data belongs in the version-one plan.
+
+Target screenshots may contain sensitive information visibly rendered by the target site. ReproDocket does not claim automatic screenshot redaction.
+
+See [`reprodocket-data-handling.md`](reprodocket-data-handling.md) and [`reprodocket-security-lifecycle.md`](reprodocket-security-lifecycle.md).
 
 ## 7. Repository shape
 
@@ -147,13 +163,27 @@ solari-cookbook/
   examples/                       upstream cookbook preserved
   LICENSE                         upstream license preserved
   README.md                       cookbook plus restrained ReproDocket entry after release
+  AGENTS.md                       execution context during development
   docs/
+    README.md
     reprodocket-design.md
     reprodocket-interface-contracts.md
+    reprodocket-data-handling.md
     reprodocket-security-lifecycle.md
+    reprodocket-toolchain-baseline.md
     reprodocket-sdk-baseline.md
+    reprodocket-fixture-spec.md
+    reprodocket-ui-spec.md
     reprodocket-test-matrix.md
     implementation/
+      00-contract-reconciliation.md
+      README.md
+      01-foundation-local-shell.md
+      02-evidence-persistence-ui.md
+      03-solari-browser-sandbox.md
+      04-investigation-verification-e2e.md
+      05-bug-finding-hardening-final-proof.md
+      06-publication-challenge-submission.md
   reprodocket/
     package.json
     package-lock.json
@@ -176,6 +206,8 @@ solari-cookbook/
 
 Implementation files should have one clear responsibility. Shared bottlenecks are split when they become multi-purpose or create unclear ownership.
 
+Development-only planning artifacts are explicitly reviewed during final publication. Their existence during construction does not mean every implementation-planning file must remain in the release candidate.
+
 ## 8. Local startup and zero-configuration goal
 
 The normal Windows start path is:
@@ -196,7 +228,7 @@ New Windows automation does not use WMIC.
 
 ## 9. Local service security
 
-The local server binds to loopback only by default. It rejects unexpected host/origin state-changing requests and uses a process-local request nonce as defense in depth for mutation APIs.
+The local server binds to loopback only by default. It rejects unexpected Host/origin state-changing requests and uses a process-local request nonce as defense in depth for mutation APIs.
 
 The built UI uses a restrictive content policy. Target-derived values render as inert text. The standalone HTML report escapes untrusted values and does not require JavaScript.
 
@@ -208,13 +240,13 @@ Detailed requirements are in [`reprodocket-security-lifecycle.md`](reprodocket-s
 
 Version one accepts only public HTTP/HTTPS targets. It rejects executable/local schemes, credentials embedded in URLs, loopback, link-local, private address literals, and known metadata-service destinations before execution.
 
-Redirects and DNS destinations are revalidated to the strongest authoritative boundary the installed browser/provider exposes. The product must document any provider-dependent limitation rather than claiming universal SSRF prevention.
+Redirects and DNS destinations are revalidated to the strongest authoritative boundary the installed browser/provider exposes. The product documents any provider-dependent limitation rather than claiming universal SSRF prevention.
 
 ## 11. Evidence model
 
 Evidence is captured at meaningful semantic boundaries rather than fixed screenshot intervals.
 
-Durable evidence may include:
+Durable target-derived evidence may include:
 
 * screenshots,
 * warning/error console entries,
@@ -222,13 +254,15 @@ Durable evidence may include:
 * sanitized network method/URL/status/failure information,
 * action/expectation timeline,
 * Solari session identity,
-* replay availability/reference or locally retained replay data when the TypeScript SDK path is proven,
+* replay availability/reference or locally retained replay data when a supported TypeScript path is proven,
 * investigation and verification observations,
 * cleanup state.
 
-Authorization/cookie headers, unrestricted bodies, password values, browser-storage dumps, Solari credentials, and arbitrary DOM snapshots are excluded by default.
+Authorization/Cookie/Set-Cookie headers, unrestricted request/response bodies, browser-storage dumps, and the Solari credential are excluded by default. Structured provider-derived text passes through a central redaction boundary before persistence.
 
-Text evidence passes through a central redaction boundary before persistence.
+The user-authored source plan is separately persisted as intentional run input and must contain only nonsecret test data in version one.
+
+Screenshots and replay material can contain target-visible state and are not represented as automatically privacy-safe.
 
 ## 12. Evidence integrity and provenance
 
@@ -253,6 +287,8 @@ The full harness hosts a controlled test website inside a real Solari sandbox an
 The fixture contains deterministic defect, healthy, ambiguous, and nonrepeatable cases. Its truth is tested independently from ReproDocket so the fixture itself is not a weak oracle.
 
 Production ReproDocket code cannot branch on fixture route names or scenario IDs to manufacture expected outcomes.
+
+Exact fixture behavior is defined in [`reprodocket-fixture-spec.md`](reprodocket-fixture-spec.md).
 
 ## 15. Run storage and recovery
 
@@ -315,6 +351,8 @@ limitations/errors
 ```
 
 Every visible interaction either performs real behavior, is truthfully disabled with a current reason, or is absent. No placeholder/dead controls are used for presentation value.
+
+Detailed UI behavior and visual acceptance are defined in [`reprodocket-ui-spec.md`](reprodocket-ui-spec.md).
 
 ## 19. Horizontal and vertical integration
 
@@ -409,6 +447,7 @@ always classify broken
 always classify healthy
 hardcode fixture scenario outcome
 accept stale source revision evidence
+treat the plan as optional
 ```
 
 A test that remains green under the defect it exists to guard is itself defective and must be strengthened.
@@ -462,22 +501,22 @@ Available
 
 `Available` requires the declared scope to be complete, integrated, persistent/recoverable where applicable, failure-aware, resource-clean, validated, documented, and free of known ordinary-scope hardening blockers.
 
-The root cookbook README will surface ReproDocket only after the project is genuinely usable, while preserving the upstream cookbook identity. ReproDocket receives its own README with setup, supported plan grammar, evidence model, validation scope, and limitations.
+The root cookbook README will surface ReproDocket only after the project is genuinely usable, while preserving the upstream cookbook identity. ReproDocket receives its own README with setup, supported plan grammar, evidence model, validation scope, privacy limitations, and known limitations.
 
 Any challenge/social submission is prepared from the final validated product and remains a separate public-mutation decision.
 
 ## 26. Detailed implementation sequence
 
-The authoritative implementation plan index is [`implementation/README.md`](implementation/README.md).
+The authoritative implementation plan index is [`implementation/README.md`](implementation/README.md). Before Plan 1, the executor reads and applies [`implementation/00-contract-reconciliation.md`](implementation/00-contract-reconciliation.md).
 
-Ordered plans:
+Ordered implementation phases:
 
 1. Foundation and local shell.
 2. Evidence, persistence, and local results.
 3. Solari browser and sandbox substrate.
 4. Investigation, independent verification, and complete end-to-end path.
 5. Deliberate bug finding, hardening, and final proof.
-6. Publication and challenge submission.
+6. Publication and challenge submission preparation.
 
 The plans intentionally build executable validation alongside each capability rather than postponing the harness until the end.
 
